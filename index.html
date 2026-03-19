@@ -1,0 +1,512 @@
+import React, { useState, useEffect, useMemo } from 'react';
+import { 
+  BarChart3, 
+  Search, 
+  Layers, 
+  ChevronDown, 
+  ChevronUp, 
+  AlertCircle,
+  Building2,
+  Users,
+  MapPin
+} from 'lucide-react';
+
+// Requested KPI columns for the Table (0-indexed)
+const KPI_COLS = [
+  { letter: 'N', index: 13, name: '未來 ICB Booking', format: 'number' },
+  { letter: 'P', index: 15, name: '未來 人均 CB Booking', format: 'number' },
+  { letter: 'Q', index: 16, name: '今天新增 CB Booking', format: 'number' },
+  { letter: 'R', index: 17, name: '當月 激活人數', format: 'number' },
+  { letter: 'W', index: 22, name: 'PT Qty', format: 'number' },
+  { letter: 'Y', index: 24, name: '今天 PT QTY', format: 'number' },
+  { letter: 'AA', index: 26, name: '今天 Full course', format: 'number' },
+  { letter: 'AB', index: 27, name: 'Paid Trial 龍尾 Book', format: 'number' },
+  { letter: 'AC', index: 28, name: 'Today MTD%', format: 'percent' },
+  { letter: 'AE', index: 30, name: '今天銷售額', format: 'currency' },
+  { letter: 'AF', index: 31, name: 'AF Metric', format: 'number' },
+  { letter: 'AH', index: 33, name: 'AH (No Data)', format: 'number' },
+  { letter: 'AT', index: 45, name: 'AT Metric', format: 'number' },
+  { letter: 'AX', index: 49, name: 'AX Metric', format: 'number' }
+];
+
+// Helper to parse CSV manually
+function parseCSV(text) {
+  const result = [];
+  const lines = text.split(/\r?\n/);
+  for (let line of lines) {
+    const row = [];
+    let inQuotes = false;
+    let val = "";
+    for (let i = 0; i < line.length; i++) {
+      const char = line[i];
+      if (char === '"') inQuotes = !inQuotes;
+      else if (char === ',' && !inQuotes) { row.push(val.trim()); val = ""; }
+      else val += char;
+    }
+    row.push(val.trim());
+    result.push(row);
+  }
+  return result;
+}
+
+const parseNumber = (val) => {
+  if (!val || val === '-' || val === '#N/A' || val === 'no data atm') return 0;
+  const clean = String(val).replace(/,/g, '').replace(/%/g, '').replace(/\$/g, '').replace(/¥/g, '');
+  const num = parseFloat(clean);
+  return isNaN(num) ? 0 : num;
+};
+
+// Configuration for GitHub Publishing
+// Replace this ID with your own Google Sheet ID if deploying a fork
+const GOOGLE_SHEET_ID = '1mtORjZ4a5EyrlPJsiejhXuMZiyw5MStoXdxn5l1Jhno';
+
+export default function App() {
+  const [data, setData] = useState([]);
+  const [headers, setHeaders] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  // Cross-tab summary data state
+  const [summaryData, setSummaryData] = useState({
+    totalNodes: 0,
+    nodeDelta: 0,
+    identitiesB5: 1,
+    futureICB: 0,
+    avgFutureICB: 0,
+    todayNewICB: 0,
+    monthlyActive: 0,
+    ptQty: 0,
+    todayPtQty: 0,
+    fullCourseQty: 0,
+    todayFullCourseQty: 0,
+    paidTrialLongTail: 0,
+    fullCourseMoney: 0,
+    todayMtdPercent: 0,
+    todaySales: 0
+  });
+
+  // Filters and Grouping
+  const [searchTerm, setSearchTerm] = useState('');
+  const [viewLevel, setViewLevel] = useState('Therapist'); 
+  const [sortConfig, setSortConfig] = useState({ key: null, direction: 'asc' });
+
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        setLoading(true);
+        const sheetId = GOOGLE_SHEET_ID;
+        
+        // Fetching from 3 different tabs
+        const urls = [
+          `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&sheet=real%20time`,
+          `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&sheet=Overview`,
+          `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&sheet=Identities`
+        ];
+
+        const [realTimeRes, overviewRes, identitiesRes] = await Promise.all(
+          urls.map(url => fetch(url))
+        );
+
+        if (!realTimeRes.ok) throw new Error("Could not fetch the sheet. Please ensure it's set to 'Anyone with the link can view'.");
+        
+        const realTimeCsv = await realTimeRes.text();
+        const overviewCsv = await overviewRes.text();
+        const identitiesCsv = await identitiesRes.text();
+
+        const realTimeParsed = parseCSV(realTimeCsv);
+        const overviewParsed = parseCSV(overviewCsv);
+        const identitiesParsed = parseCSV(identitiesCsv);
+
+        // --- 1. EXTRACT DATA FOR SUMMARY PANEL (Cross-tab) ---
+        
+        // Overview Tab Lookups
+        let totalNodes = 0;
+        let nodeDelta = 0;
+        overviewParsed.forEach(row => {
+          if (row[0] === 'Nodes') totalNodes = parseNumber(row[1]);
+          if (row[0] === 'Nodes_Delta') nodeDelta = parseNumber(row[1]);
+        });
+
+        // Identities Tab Lookups (Cell B5 -> Row index 4, Col index 1)
+        let identitiesB5 = 1;
+        if (identitiesParsed.length > 4 && identitiesParsed[4].length > 1) {
+          identitiesB5 = parseNumber(identitiesParsed[4][1]) || 1; 
+        }
+
+        // Real Time Tab "Grand Total" Lookups
+        let futureICB = 0, avgFutureICB = 0, todayNewICB = 0, monthlyActive = 0;
+        let ptQty = 0, todayPtQty = 0, fullCourseQty = 0, todayFullCourseQty = 0, paidTrialLongTail = 0;
+        let fullCourseMoney = 0, todayMtdPercent = 0, todaySales = 0;
+
+        const grandTotalRow = realTimeParsed.find(row => row[2] === 'Grand Total');
+        if (grandTotalRow) {
+          futureICB = parseNumber(grandTotalRow[13]); // Column N
+          avgFutureICB = parseNumber(grandTotalRow[14]); // Column O
+          todayNewICB = parseNumber(grandTotalRow[15]); // Column P
+          monthlyActive = parseNumber(grandTotalRow[17]); // Column R
+          
+          ptQty = parseNumber(grandTotalRow[27]); // Column AB
+          todayPtQty = parseNumber(grandTotalRow[28]); // Column AC
+          fullCourseQty = parseNumber(grandTotalRow[30]); // Column AE
+          todayFullCourseQty = parseNumber(grandTotalRow[31]); // Column AF
+          paidTrialLongTail = parseNumber(grandTotalRow[17]); // Column R (Requested mapping)
+          fullCourseMoney = parseNumber(grandTotalRow[34]); // Column AI
+          todayMtdPercent = parseNumber(grandTotalRow[45]); // Column AT
+          todaySales = parseNumber(grandTotalRow[49]); // Column AX
+        }
+
+        setSummaryData({
+          totalNodes, nodeDelta, identitiesB5,
+          futureICB, avgFutureICB, todayNewICB, monthlyActive,
+          ptQty, todayPtQty, fullCourseQty, todayFullCourseQty, paidTrialLongTail,
+          fullCourseMoney, todayMtdPercent, todaySales
+        });
+
+        // --- 2. EXTRACT DATA FOR MAIN TABLE (real time tab) ---
+        let headerRowIdx = 0;
+        for (let i = 0; i < Math.min(10, realTimeParsed.length); i++) {
+          if (realTimeParsed[i].some(cell => cell.toLowerCase().includes('brand') || cell.toLowerCase().includes('center'))) {
+            headerRowIdx = i;
+            break;
+          }
+        }
+
+        const extractedHeaders = realTimeParsed[headerRowIdx];
+        const extractedData = realTimeParsed.slice(headerRowIdx + 1, 250).filter(row => row.length > 5 && row[0] !== ''); 
+        const finalHeaders = extractedHeaders.map((h, i) => h || `Col ${i + 1}`);
+
+        setHeaders(finalHeaders);
+        setData(extractedData);
+        setError(null);
+
+      } catch (err) {
+        setError(err.message);
+        
+        // Mock data to demonstrate the UI if Google sheets fails to load
+        setSummaryData({
+          totalNodes: 862, nodeDelta: 12, identitiesB5: 4.31,
+          futureICB: 342, avgFutureICB: 1.2, todayNewICB: 45, monthlyActive: 280,
+          ptQty: 120, todayPtQty: 15, fullCourseQty: 60, todayFullCourseQty: 8, paidTrialLongTail: 35,
+          fullCourseMoney: 125000, todayMtdPercent: 42.5, todaySales: 35000
+        });
+        setHeaders(['Brand', 'PIC', 'Center', 'Therapist', ...Array(50).fill('Data')]);
+        setData([
+          ['Brand A', 'John Doe', 'Center North', 'Alice', ...Array(50).fill('100')],
+          ['Brand B', 'Jane Smith', 'Center South', 'Charlie', ...Array(50).fill('200')],
+        ]);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchData();
+  }, []);
+
+  const activeKPIs = KPI_COLS.map(kpi => ({
+    ...kpi,
+    displayName: headers[kpi.index] ? headers[kpi.index].replace(/"/g, '') : kpi.name
+  }));
+
+  const processedData = useMemo(() => {
+    let result = [];
+    const filtered = data.filter(row => {
+      const text = row.join(' ').toLowerCase();
+      return text.includes(searchTerm.toLowerCase());
+    });
+
+    if (viewLevel === 'Therapist') {
+      result = filtered.map((row, idx) => ({
+        id: `row-${idx}`, Brand: row[0] || 'Unknown', Center: row[2] || 'Unknown', Therapist: row[3] || 'Unknown',
+        ...activeKPIs.reduce((acc, kpi) => ({ ...acc, [kpi.letter]: parseNumber(row[kpi.index]) }), {})
+      }));
+    } else {
+      const groupIdx = viewLevel === 'Center' ? 2 : 0;
+      const groups = {};
+      filtered.forEach(row => {
+        const groupKey = row[groupIdx] || 'Unknown';
+        if (!groups[groupKey]) {
+          groups[groupKey] = {
+            id: groupKey, Brand: viewLevel === 'Center' ? (row[0] || 'Unknown') : groupKey,
+            Center: viewLevel === 'Center' ? groupKey : 'All Centers', Therapist: 'All', count: 0
+          };
+          activeKPIs.forEach(kpi => groups[groupKey][kpi.letter] = 0);
+        }
+        groups[groupKey].count += 1;
+        activeKPIs.forEach(kpi => groups[groupKey][kpi.letter] += parseNumber(row[kpi.index]));
+      });
+      result = Object.values(groups).map(group => {
+        const finalGroup = { ...group };
+        activeKPIs.forEach(kpi => {
+          if (kpi.format === 'percent') finalGroup[kpi.letter] = group[kpi.letter] / group.count;
+        });
+        return finalGroup;
+      });
+    }
+
+    if (sortConfig.key) {
+      result.sort((a, b) => {
+        const valA = a[sortConfig.key];
+        const valB = b[sortConfig.key];
+        if (valA < valB) return sortConfig.direction === 'asc' ? -1 : 1;
+        if (valA > valB) return sortConfig.direction === 'asc' ? 1 : -1;
+        return 0;
+      });
+    }
+    return result;
+  }, [data, searchTerm, viewLevel, sortConfig, headers]);
+
+  const requestSort = (key) => {
+    let direction = 'asc';
+    if (sortConfig.key === key && sortConfig.direction === 'asc') direction = 'desc';
+    setSortConfig({ key, direction });
+  };
+
+  const formatDisplayValue = (val, format) => {
+    if (val === undefined || isNaN(val)) return '-';
+    if (format === 'percent') return `${val.toFixed(2)}%`;
+    if (format === 'currency') return `$${val.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    return Number.isInteger(val) ? val.toLocaleString() : val.toFixed(2).replace(/\.00$/, '');
+  };
+
+  if (loading) return (
+    <div className="flex h-screen w-full items-center justify-center bg-gray-50">
+      <div className="flex flex-col items-center gap-4">
+        <div className="h-12 w-12 animate-spin rounded-full border-4 border-blue-500 border-t-transparent"></div>
+        <p className="text-gray-600 font-medium">Loading Real Time Data (up to row 250)...</p>
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="min-h-screen bg-gray-50 p-6 font-sans text-gray-800">
+      
+      {/* Header & Controls */}
+      <div className="mb-6 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white p-5 rounded-xl shadow-sm border border-gray-100">
+        <div>
+          <h1 className="text-2xl font-bold flex items-center gap-2 text-gray-900">
+            <BarChart3 className="text-blue-600" /> 少女膠原推廣實時成績
+          </h1>
+        </div>
+        <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
+          <div className="flex bg-gray-100 p-1 rounded-lg">
+            {['Brand', 'Center', 'Therapist'].map(level => (
+              <button
+                key={level} onClick={() => setViewLevel(level)}
+                className={`px-4 py-2 text-sm font-medium rounded-md transition-all ${
+                  viewLevel === level ? 'bg-white text-blue-700 shadow-sm' : 'text-gray-600 hover:text-gray-900 hover:bg-gray-200'
+                }`}
+              >
+                {level === 'Brand' && <Building2 className="inline w-4 h-4 mr-1 mb-0.5" />}
+                {level === 'Center' && <MapPin className="inline w-4 h-4 mr-1 mb-0.5" />}
+                {level === 'Therapist' && <Users className="inline w-4 h-4 mr-1 mb-0.5" />}
+                By {level}
+              </button>
+            ))}
+          </div>
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
+            <input
+              type="text" placeholder="Filter names..."
+              className="pl-9 pr-4 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white w-full"
+              value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)}
+            />
+          </div>
+        </div>
+      </div>
+
+      {error && (
+        <div className="mb-6 p-4 bg-red-50 border border-red-200 text-red-700 rounded-xl flex items-start gap-3">
+          <AlertCircle className="shrink-0 w-5 h-5 mt-0.5" />
+          <div>
+            <h3 className="font-semibold">Unable to fetch sheet data live</h3>
+            <p className="text-sm mt-1">{error}</p>
+            <p className="text-sm mt-1 font-medium">Currently displaying fallback visual structure.</p>
+          </div>
+        </div>
+      )}
+
+      {/* --- NEW SUMMARY PANEL --- */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+        
+        {/* 1st Section (Dark Blue Box) */}
+        <div className="bg-blue-800 rounded-xl p-4 flex flex-col shadow-lg h-full">
+          <h3 className="text-center font-bold text-lg mb-4 border-b border-blue-600 pb-2 tracking-wide text-white">200分發點</h3>
+          
+          <div className="flex flex-col items-center mb-6 mt-2">
+            <span className="text-4xl font-extrabold text-black">{summaryData.totalNodes.toLocaleString()}</span>
+            <span className="text-xs text-black mt-1 uppercase tracking-wider font-bold">Total Nodes</span>
+          </div>
+          
+          <div className="flex justify-between items-end gap-2 mt-auto">
+            <div className="bg-white/50 border border-white/40 rounded-lg p-2 flex-1 flex flex-col items-center text-center shadow-inner">
+              <span className="text-lg font-extrabold text-black">{summaryData.nodeDelta > 0 ? `+${summaryData.nodeDelta}` : summaryData.nodeDelta}</span>
+              <span className="text-[10px] text-black font-bold uppercase mt-0.5 leading-tight drop-shadow-sm">Node 3 Days Changes</span>
+            </div>
+            <div className="bg-white/50 border border-white/40 rounded-lg p-2 flex-1 flex flex-col items-center text-center shadow-inner">
+              <span className="text-lg font-extrabold text-black">
+                {(summaryData.totalNodes / (summaryData.identitiesB5 || 1)).toFixed(1)}
+              </span>
+              <span className="text-[10px] text-black font-bold uppercase mt-0.5 leading-tight drop-shadow-sm">平均每人<br/>分發點數量</span>
+            </div>
+          </div>
+        </div>
+
+        {/* 2nd Section (Orange Box) */}
+        <div className="bg-orange-500 rounded-xl p-4 flex flex-col shadow-lg h-full">
+          <h3 className="text-center font-bold text-lg mb-4 border-b border-orange-400 pb-2 tracking-wide text-white">862+ICB</h3>
+          
+          <div className="flex flex-col items-center mb-6 mt-2">
+            <span className="text-4xl font-extrabold text-black">{summaryData.futureICB.toLocaleString()}</span>
+            <span className="text-xs text-black mt-1 uppercase tracking-wider font-bold">未來 ICB Booking</span>
+          </div>
+          
+          <div className="grid grid-cols-3 gap-1 mt-auto">
+            <div className="bg-white/50 border border-white/40 rounded-lg p-1.5 flex flex-col items-center text-center shadow-inner">
+              <span className="text-base font-extrabold text-black">{summaryData.avgFutureICB.toLocaleString()}</span>
+              <span className="text-[9px] text-black font-bold uppercase leading-tight mt-1 drop-shadow-sm">未來 人均<br/>ICB Booking</span>
+            </div>
+            <div className="bg-white/50 border border-white/40 rounded-lg p-1.5 flex flex-col items-center text-center shadow-inner">
+              <span className="text-base font-extrabold text-black">{summaryData.todayNewICB.toLocaleString()}</span>
+              <span className="text-[9px] text-black font-bold uppercase leading-tight mt-1 drop-shadow-sm">今天新增<br/>ICB Booking</span>
+            </div>
+            <div className="bg-white/50 border border-white/40 rounded-lg p-1.5 flex flex-col items-center text-center shadow-inner">
+              <span className="text-base font-extrabold text-black">{summaryData.monthlyActive.toLocaleString()}</span>
+              <span className="text-[9px] text-black font-bold uppercase leading-tight mt-1 drop-shadow-sm">當月<br/>激活人數</span>
+            </div>
+          </div>
+        </div>
+
+        {/* 3rd Section (Green Box) */}
+        <div className="bg-[#4caf50] rounded-xl p-4 flex flex-col shadow-lg h-full">
+          <h3 className="text-center font-bold text-lg mb-4 border-b border-[#3d8c40] pb-2 tracking-wide text-white">High PEXO</h3>
+          
+          <div className="grid grid-cols-2 gap-2 mb-6 mt-2 text-center">
+            <div className="flex flex-col items-center">
+              <div className="text-3xl font-extrabold flex items-baseline text-black">
+                {summaryData.ptQty.toLocaleString()} 
+                <span className="text-base text-black ml-1 font-bold">({summaryData.todayPtQty})</span>
+              </div>
+              <span className="text-xs text-black mt-1 uppercase tracking-wider font-extrabold">PT Qty (今日)</span>
+            </div>
+            
+            <div className="flex flex-col items-center">
+              <div className="text-3xl font-extrabold flex items-baseline text-black">
+                {summaryData.fullCourseQty.toLocaleString()} 
+                <span className="text-base text-black ml-1 font-bold">({summaryData.todayFullCourseQty})</span>
+              </div>
+              <span className="text-xs text-black mt-1 uppercase tracking-wider font-extrabold">Full Course Qty (今日)</span>
+            </div>
+          </div>
+          
+          <div className="flex justify-between items-end gap-2 mt-auto">
+            <div className="bg-white/50 border border-white/40 rounded-lg p-2 flex-1 flex flex-col items-center text-center shadow-inner">
+              <span className="text-xl font-extrabold text-black">{summaryData.paidTrialLongTail.toLocaleString()}</span>
+              <span className="text-[10px] text-black font-extrabold uppercase mt-1 drop-shadow-sm leading-tight">Paid Trial<br/>龍尾 Book</span>
+            </div>
+            <div className="bg-white/50 border border-white/40 rounded-lg p-2 flex-1 flex flex-col items-center text-center shadow-inner">
+              <span className="text-xl font-extrabold text-black">${summaryData.fullCourseMoney.toLocaleString()}</span>
+              <span className="text-[10px] text-black font-extrabold uppercase mt-1 drop-shadow-sm leading-tight">Full Course $</span>
+            </div>
+          </div>
+        </div>
+
+        {/* 4th Section (Purple Box) */}
+        <div className="bg-purple-600 rounded-xl p-4 flex flex-col shadow-lg h-full">
+          <h3 className="text-center font-bold text-lg mb-4 border-b border-purple-400 pb-2 tracking-wide text-white">200% 紫燈</h3>
+          
+          <div className="flex flex-col justify-around h-full gap-4 mt-2">
+            <div className="flex flex-col items-center">
+              <div className="text-3xl font-extrabold text-black">{summaryData.todayMtdPercent.toLocaleString()}%</div>
+              <span className="text-xs text-black mt-1 font-bold uppercase tracking-wider">Today MTD%</span>
+            </div>
+            
+            <div className="flex flex-col items-center">
+              <div className="text-3xl font-extrabold text-black">${summaryData.todaySales.toLocaleString()}</div>
+              <span className="text-xs text-black mt-1 font-bold uppercase tracking-wider">今日銷售</span>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      {/* --- Data Table --- */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+        <div className="overflow-x-auto max-h-[600px]">
+          <table className="w-full text-sm text-left whitespace-nowrap">
+            <thead className="text-xs text-gray-600 bg-gray-50 sticky top-0 z-10 shadow-sm">
+              <tr>
+                {viewLevel === 'Brand' && (
+                  <th className="px-6 py-4 font-semibold cursor-pointer hover:bg-gray-100" onClick={() => requestSort('Brand')}>
+                    Brand {sortConfig.key === 'Brand' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+                  </th>
+                )}
+                {viewLevel === 'Center' && (
+                  <>
+                    <th className="px-6 py-4 font-semibold cursor-pointer hover:bg-gray-100" onClick={() => requestSort('Brand')}>Brand</th>
+                    <th className="px-6 py-4 font-semibold cursor-pointer hover:bg-gray-100" onClick={() => requestSort('Center')}>Center {sortConfig.key === 'Center' && (sortConfig.direction === 'asc' ? '↑' : '↓')}</th>
+                  </>
+                )}
+                {viewLevel === 'Therapist' && (
+                  <>
+                    <th className="px-6 py-4 font-semibold cursor-pointer hover:bg-gray-100" onClick={() => requestSort('Brand')}>Brand</th>
+                    <th className="px-6 py-4 font-semibold cursor-pointer hover:bg-gray-100" onClick={() => requestSort('Center')}>Center</th>
+                    <th className="px-6 py-4 font-semibold cursor-pointer hover:bg-gray-100" onClick={() => requestSort('Therapist')}>
+                      Therapist {sortConfig.key === 'Therapist' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+                    </th>
+                  </>
+                )}
+                {activeKPIs.map(kpi => (
+                  <th key={kpi.letter} onClick={() => requestSort(kpi.letter)} className="px-6 py-4 font-semibold cursor-pointer hover:bg-gray-100 text-right group">
+                    <div className="flex items-center justify-end gap-1">
+                      <span className="truncate max-w-[120px]" title={kpi.displayName}>{kpi.displayName}</span>
+                      {sortConfig.key === kpi.letter ? (
+                        sortConfig.direction === 'asc' ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />
+                      ) : <ChevronDown className="w-3 h-3 opacity-0 group-hover:opacity-50" />}
+                    </div>
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {processedData.length > 0 ? (
+                processedData.map((row, idx) => (
+                  <tr key={row.id || idx} className="hover:bg-blue-50/50 transition-colors">
+                    {viewLevel === 'Brand' && <td className="px-6 py-3 font-medium text-gray-900">{row.Brand}</td>}
+                    {viewLevel === 'Center' && (
+                      <>
+                        <td className="px-6 py-3 text-gray-600">{row.Brand}</td>
+                        <td className="px-6 py-3 font-medium text-gray-900">{row.Center}</td>
+                      </>
+                    )}
+                    {viewLevel === 'Therapist' && (
+                      <>
+                        <td className="px-6 py-3 text-gray-500">{row.Brand}</td>
+                        <td className="px-6 py-3 text-gray-600">{row.Center}</td>
+                        <td className="px-6 py-3 font-medium text-gray-900">{row.Therapist}</td>
+                      </>
+                    )}
+                    {activeKPIs.map(kpi => (
+                      <td key={kpi.letter} className="px-6 py-3 text-right text-gray-700">
+                        {formatDisplayValue(row[kpi.letter], kpi.format)}
+                      </td>
+                    ))}
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan={100} className="px-6 py-12 text-center text-gray-500">
+                    No data matching your filters found.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+        <div className="p-4 border-t border-gray-100 bg-gray-50 text-xs text-gray-500 text-right">
+          Showing {processedData.length} records {viewLevel !== 'Therapist' ? 'groups' : ''} 
+          (Limited to top 250 rows).
+        </div>
+      </div>
+    </div>
+  );
+}
