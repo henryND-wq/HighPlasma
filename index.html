@@ -60,6 +60,14 @@
             return isNaN(num) ? 0 : num;
         };
 
+        // Short form formatting for K and M
+        const formatShortCurrency = (val) => {
+            if (val === undefined || isNaN(val)) return '-';
+            if (val >= 1000000) return '$' + (val / 1000000).toFixed(1) + 'M';
+            if (val >= 1000) return '$' + (val / 1000).toFixed(1) + 'K';
+            return '$' + val.toLocaleString();
+        };
+
         const getConditionalFormat = (colName, val, targetRatio, ranges) => {
             const num = parseFloat(val);
             if (isNaN(num)) return { className: 'text-gray-800' };
@@ -154,10 +162,11 @@
                     const urls = [
                     `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&sheet=real%20time`,
                     `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&sheet=Overview`,
-                    `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&sheet=Identities`
+                    `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&sheet=Identities`,
+                    `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&sheet=Test%20Overview`
                     ];
 
-                    const [realTimeRes, overviewRes, identitiesRes] = await Promise.all(
+                    const [realTimeRes, overviewRes, identitiesRes, testOverviewRes] = await Promise.all(
                         urls.map(url => fetch(url))
                     );
 
@@ -166,17 +175,25 @@
                     const realTimeCsv = await realTimeRes.text();
                     const overviewCsv = await overviewRes.text();
                     const identitiesCsv = await identitiesRes.text();
+                    const testOverviewCsv = await testOverviewRes.text();
 
                     const realTimeParsed = parseCSV(realTimeCsv);
                     const overviewParsed = parseCSV(overviewCsv);
                     const identitiesParsed = parseCSV(identitiesCsv);
+                    const testOverviewParsed = parseCSV(testOverviewCsv);
 
                     // --- 1. EXTRACT DATA FOR GLOBAL SUMMARY PANEL ---
                     let totalNodes = 0;
                     let nodeDelta = 0;
+                    
+                    // Fetch Total Nodes from Overview
                     overviewParsed.forEach(row => {
                         if (row[0] === 'Nodes') totalNodes = parseNumber(row[1]);
-                        if (row[0] === 'Nodes_Delta') nodeDelta = parseNumber(row[1]);
+                    });
+
+                    // Fetch Node 3 Days Changes from Test Overview
+                    testOverviewParsed.forEach(row => {
+                        if (row[0] === 'Nodes_3Day') nodeDelta = parseNumber(row[1]); 
                     });
 
                     let identitiesB5 = 1;
@@ -225,14 +242,14 @@
                         
                         futureICB: getDynamicIndex(extractedHeaders, ['未來 ICB Booking', '未來 ICB'], 13), // N
                         avgFutureICB: getDynamicIndex(extractedHeaders, ['未來 人均', 'CB Booking', 'ICB Booking'], 14), // O
-                        todayNewICB: getDynamicIndex(extractedHeaders, ['今天新增', 'CB Booking', 'ICB Booking'], 15), // P (fallback explicitly set to 15/P)
+                        todayNewICB: getDynamicIndex(extractedHeaders, ['今天新增', 'CB Booking', 'ICB Booking'], 15), // P
                         monthlyActive: getDynamicIndex(extractedHeaders, ['當月 激活人數', '激活人數'], 17), // R
                         
                         ptQty: getDynamicIndex(extractedHeaders, ['PT Qty'], 27), // AB
                         todayPtQty: getDynamicIndex(extractedHeaders, ['今天 PT QTY'], 28), // AC
                         fullCourseQty: getDynamicIndex(extractedHeaders, ['今天 Full course'], 30), // AE
-                        paidTrialLongTail: getDynamicIndex(extractedHeaders, ['Paid Trial', '龍尾 Book'], 33), // AH (Explicitly requested AH=33 fallback)
-                        
+                        paidTrialLongTail: getDynamicIndex(extractedHeaders, ['Paid Trial', '龍尾 Book'], 33), // AH
+                        highPexoTodaySales: getDynamicIndex(extractedHeaders, ['Today $', '今日銷售', 'Today$'], 35), // AJ
                         fullCourseMoney: getDynamicIndex(extractedHeaders, ['Full course $', 'Full Course$'], 34), // AI
                         todayMtdPercent: getDynamicIndex(extractedHeaders, ['Today MTD%'], 45), // AT
                         todaySales: getDynamicIndex(extractedHeaders, ['今天銷售額', '今日銷售'], 49) // AX
@@ -266,11 +283,20 @@
                     setError(err.message);
                     setGlobalSummary({ totalNodes: 862, nodeDelta: 12, identitiesB5: 4.31 });
                     
-                    setColMap({ brand: 0, center: 2, therapist: 3, node: 22, avgNode: 24, node3Days: 26, futureICB: 13, avgFutureICB: 14, todayNewICB: 15, monthlyActive: 17, ptQty: 27, todayPtQty: 28, fullCourseQty: 30, paidTrialLongTail: 33, fullCourseMoney: 34, todayMtdPercent: 45, todaySales: 49 });
+                    setColMap({ brand: 0, center: 2, therapist: 3, node: 22, avgNode: 24, node3Days: 26, futureICB: 13, avgFutureICB: 14, todayNewICB: 15, monthlyActive: 17, ptQty: 27, todayPtQty: 28, fullCourseQty: 30, paidTrialLongTail: 33, highPexoTodaySales: 35, fullCourseMoney: 34, todayMtdPercent: 45, todaySales: 49 });
                     setMtdTargetRatio(1.2); 
 
+                    let mockGt = new Array(70).fill('0');
+                    mockGt[13] = '342'; mockGt[14] = '1.2'; mockGt[15] = '45'; mockGt[17] = '280';
+                    mockGt[27] = '120'; mockGt[28] = '15'; mockGt[30] = '60'; mockGt[31] = '8'; mockGt[34] = '125000'; mockGt[35] = '45000';
+                    mockGt[45] = '42.5'; mockGt[49] = '35000';
+                    setGrandTotalRow(mockGt);
+
                     setHeaders(['Brand', 'PIC', 'Center', 'Therapist', ...Array(50).fill('Data')]);
-                    setData([]);
+                    setData([
+                        ['Brand A', 'John Doe', 'Center North', 'Alice', ...Array(50).fill('100')],
+                        ['Brand B', 'Jane Smith', 'Center South', 'Bob', ...Array(50).fill('200')],
+                    ]);
                     setLastSyncTime(new Date());
                 } finally {
                     setLoading(false);
@@ -285,7 +311,6 @@
             const activeKPIs = useMemo(() => {
                 if (!colMap) return [];
                 
-                // Map the definitions structurally using the dynamically identified indices
                 return [
                     // 200 Nodes Group
                     { id: 'node', index: colMap.node, name: 'Node', format: 'number', headerClass: 'bg-blue-100 text-blue-900 border-t border-blue-200' },
@@ -309,7 +334,6 @@
                     { id: 'todaySales', index: colMap.todaySales, name: '今天銷售額', format: 'currency', headerClass: 'bg-purple-100 text-purple-900 border-t border-purple-200' }
                 ].map(kpi => ({
                     ...kpi,
-                    // If sheet header is empty, use the configured name
                     displayName: (headers[kpi.index] && headers[kpi.index].trim() !== '') ? headers[kpi.index].replace(/"/g, '') : kpi.name
                 }));
             }, [colMap, headers]);
@@ -394,6 +418,7 @@
                 let sums = {
                     futureICB: 0, avgFutureICB: 0, todayNewICB: 0, monthlyActive: 0,
                     ptQty: 0, todayPtQty: 0, fullCourseQty: 0, todayFullCourseQty: 0, paidTrialLongTail: 0,
+                    highPexoTodaySales: 0,
                     fullCourseMoney: 0, todayMtdPercent: 0, todaySales: 0
                 };
 
@@ -408,8 +433,9 @@
                     sums.ptQty = parseNumber(grandTotalRow[colMap.ptQty]);        
                     sums.todayPtQty = parseNumber(grandTotalRow[colMap.todayPtQty]);   
                     sums.fullCourseQty = parseNumber(grandTotalRow[colMap.fullCourseQty]);
-                    sums.todayFullCourseQty = parseNumber(grandTotalRow[colMap.fullCourseQty + 1]); // AF 
+                    sums.todayFullCourseQty = parseNumber(grandTotalRow[colMap.fullCourseQty + 1]); 
                     sums.paidTrialLongTail = parseNumber(grandTotalRow[colMap.paidTrialLongTail]);  
+                    sums.highPexoTodaySales = parseNumber(grandTotalRow[colMap.highPexoTodaySales]); 
                     sums.fullCourseMoney = parseNumber(grandTotalRow[colMap.fullCourseMoney]);    
                     
                     sums.todayMtdPercent = parseNumber(grandTotalRow[colMap.todayMtdPercent]);    
@@ -425,10 +451,10 @@
                         sums.todayPtQty += item.todayPtQty;
                         sums.fullCourseQty += item.fullCourseQty;
                         
-                        // todayFullCourseQty isn't mapped tightly to a visible column inside `processedData` dynamically. Using raw.
                         sums.todayFullCourseQty += parseNumber(item.raw[colMap.fullCourseQty + 1]); 
                         
                         sums.paidTrialLongTail += item.paidTrialLongTail;
+                        sums.highPexoTodaySales += parseNumber(item.raw[colMap.highPexoTodaySales]);
                         sums.fullCourseMoney += parseNumber(item.raw[colMap.fullCourseMoney]);
                         
                         sums.todayMtdPercent += item.todayMtdPercent;
@@ -626,13 +652,17 @@
                         </div>
                         
                         <div className="flex justify-between items-stretch gap-2 mt-auto">
-                            <div className="bg-white/70 border border-white/50 rounded-lg p-2 flex-1 flex flex-col justify-center items-center text-center shadow-inner">
-                                <span className="text-xl font-extrabold text-gray-800">{summaryData.paidTrialLongTail.toLocaleString()}</span>
-                                <span className="text-xs text-gray-700 font-extrabold uppercase mt-1 leading-tight">Paid Trial<br/>龍尾 Book</span>
+                            <div className="bg-white/70 border border-white/50 rounded-lg p-1.5 flex-1 flex flex-col justify-center items-center text-center shadow-inner">
+                                <span className="text-lg font-extrabold text-gray-800">{summaryData.paidTrialLongTail.toLocaleString()}</span>
+                                <span className="text-[9px] text-gray-700 font-extrabold uppercase mt-1 leading-tight">Paid Trial<br/>龍尾 Book</span>
                             </div>
-                            <div className="bg-white/70 border border-white/50 rounded-lg p-2 flex-1 flex flex-col justify-center items-center text-center shadow-inner">
-                                <span className="text-xl font-extrabold text-gray-800">${summaryData.fullCourseMoney.toLocaleString()}</span>
-                                <span className="text-xs text-gray-700 font-extrabold uppercase mt-1 leading-tight">Full Course $</span>
+                            <div className="bg-white/70 border border-white/50 rounded-lg p-1.5 flex-1 flex flex-col justify-center items-center text-center shadow-inner">
+                                <span className="text-lg font-extrabold text-gray-800">{formatShortCurrency(summaryData.highPexoTodaySales)}</span>
+                                <span className="text-[9px] text-gray-700 font-extrabold uppercase mt-1 leading-tight">今日銷售</span>
+                            </div>
+                            <div className="bg-white/70 border border-white/50 rounded-lg p-1.5 flex-1 flex flex-col justify-center items-center text-center shadow-inner">
+                                <span className="text-lg font-extrabold text-gray-800">{formatShortCurrency(summaryData.fullCourseMoney)}</span>
+                                <span className="text-[9px] text-gray-700 font-extrabold uppercase mt-1 leading-tight">Full Course $</span>
                             </div>
                         </div>
                     </div>
@@ -651,7 +681,7 @@
                             </div>
                             
                             <div className="flex flex-col items-center bg-white/70 rounded-lg py-3 flex-1 justify-center shadow-sm">
-                                <div className="text-3xl font-extrabold text-gray-800">${summaryData.todaySales.toLocaleString()}</div>
+                                <div className="text-3xl font-extrabold text-gray-800">{formatShortCurrency(summaryData.todaySales)}</div>
                                 <span className="text-xs text-gray-700 mt-1 font-bold uppercase tracking-wider">今日銷售額</span>
                             </div>
                         </div>
@@ -739,8 +769,8 @@
                                     
                                     {/* Sortable Custom KPI Headers mapping their specific background classes */}
                                     {activeKPIs.map(kpi => (
-                                        <th key={kpi.id} onClick={() => requestSort(kpi.id)} className={`px-4 py-3 font-bold cursor-pointer hover:opacity-80 transition-opacity border-b border-r border-black/5 text-right group align-top ${kpi.headerClass}`}>
-                                            <div className="flex items-center justify-end gap-1">
+                                        <th key={kpi.id} onClick={() => requestSort(kpi.id)} className={`px-4 py-3 font-bold cursor-pointer hover:opacity-80 transition-opacity border-b border-r border-black/5 text-center group align-top ${kpi.headerClass}`}>
+                                            <div className="flex items-center justify-center gap-1">
                                                 <span className="truncate max-w-[120px]" title={kpi.displayName}>{kpi.displayName}</span>
                                                 {sortConfig.key === kpi.id ? (
                                                     sortConfig.direction === 'asc' ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />
@@ -763,7 +793,7 @@
                                                 const condFormat = getConditionalFormat(kpi.name, row[kpi.id], mtdTargetRatio, colRanges);
                                                 return (
                                                     <td key={kpi.id} 
-                                                        className={`px-4 py-2.5 text-right border-r border-gray-50/50 ${condFormat.className}`}
+                                                        className={`px-4 py-2.5 text-center font-bold border-r border-gray-50/50 ${condFormat.className}`}
                                                         style={condFormat.style}
                                                     >
                                                         {formatDisplayValue(row[kpi.id], kpi.format)}
