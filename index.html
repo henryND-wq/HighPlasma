@@ -125,8 +125,16 @@
 
         // --- DYNAMIC MAPPING HELPERS ---
         function getDynamicIndex(headers, searchTerms, fallbackIndex) {
+            // First pass: Exact match (ignoring newlines from sheets)
             for (let i = 0; i < headers.length; i++) {
-                const h = (headers[i] || '').replace(/"/g, '').trim().toLowerCase();
+                const h = (headers[i] || '').replace(/[\r\n]+/g, ' ').replace(/"/g, '').trim().toLowerCase();
+                if (searchTerms.some(term => h === term.toLowerCase())) {
+                    return i;
+                }
+            }
+            // Second pass: Includes partial match
+            for (let i = 0; i < headers.length; i++) {
+                const h = (headers[i] || '').replace(/[\r\n]+/g, ' ').replace(/"/g, '').trim().toLowerCase();
                 if (searchTerms.some(term => h.includes(term.toLowerCase()))) {
                     return i;
                 }
@@ -248,10 +256,13 @@
                         
                         ptQty: getDynamicIndex(extractedHeaders, ['PT Qty'], 27), // AB
                         todayPtQty: getDynamicIndex(extractedHeaders, ['今天 PT QTY'], 28), // AC
-                        fullCourseQty: getDynamicIndex(extractedHeaders, ['今天 Full course'], 30), // AE
-                        paidTrialLongTail: getDynamicIndex(extractedHeaders, ['Paid Trial', '龍尾 Book'], 33), // AH
-                        highPexoTodaySales: getDynamicIndex(extractedHeaders, ['Today $', '今日銷售', 'Today$'], 35), // AJ
-                        fullCourseMoney: getDynamicIndex(extractedHeaders, ['Full course $', 'Full Course$'], 34), // AI
+                        
+                        fullCourseQty: getDynamicIndex(extractedHeaders, ['Full course Qty.', 'Full course Qty'], 30), // AE
+                        todayFullCourseQty: getDynamicIndex(extractedHeaders, ['今天 Full course'], 33), // AH - Updated
+                        paidTrialLongTail: getDynamicIndex(extractedHeaders, ['Paid Trial 龍尾 Book', '龍尾 Book'], 35), // AJ - Updated
+                        highPexoTodaySales: getDynamicIndex(extractedHeaders, ['Today $', '今日銷售', 'Today$'], 34), // AI - Updated
+                        fullCourseMoney: getDynamicIndex(extractedHeaders, ['$'], 32), // AG - Updated
+                        
                         todayMtdPercent: getDynamicIndex(extractedHeaders, ['Today MTD%'], 45), // AT
                         todaySales: getDynamicIndex(extractedHeaders, ['今天銷售額', '今日銷售'], 49) // AX
                     };
@@ -284,12 +295,12 @@
                     setError(err.message);
                     setGlobalSummary({ totalNodes: 862, nodeDelta: 12, identitiesB5: 4.31 });
                     
-                    setColMap({ brand: 0, center: 2, therapist: 3, node: 22, avgNode: 24, node3Days: 26, futureICB: 13, avgFutureICB: 14, todayNewICB: 15, monthlyActive: 17, ptQty: 27, todayPtQty: 28, fullCourseQty: 30, paidTrialLongTail: 33, highPexoTodaySales: 35, fullCourseMoney: 34, todayMtdPercent: 45, todaySales: 49 });
+                    setColMap({ brand: 0, center: 2, therapist: 3, node: 22, avgNode: 24, node3Days: 26, futureICB: 13, avgFutureICB: 14, todayNewICB: 15, monthlyActive: 17, ptQty: 27, todayPtQty: 28, fullCourseQty: 30, todayFullCourseQty: 33, paidTrialLongTail: 35, highPexoTodaySales: 34, fullCourseMoney: 32, todayMtdPercent: 45, todaySales: 49 });
                     setMtdTargetRatio(1.2); 
 
                     let mockGt = new Array(70).fill('0');
                     mockGt[13] = '342'; mockGt[14] = '1.2'; mockGt[15] = '45'; mockGt[17] = '280';
-                    mockGt[27] = '120'; mockGt[28] = '15'; mockGt[30] = '60'; mockGt[31] = '8'; mockGt[34] = '125000'; mockGt[35] = '45000';
+                    mockGt[27] = '120'; mockGt[28] = '15'; mockGt[30] = '60'; mockGt[33] = '8'; mockGt[35] = '35'; mockGt[34] = '45000'; mockGt[32] = '125000'; 
                     mockGt[45] = '42.5'; mockGt[49] = '35000';
                     setGrandTotalRow(mockGt);
 
@@ -327,7 +338,7 @@
                     // High Pexo PT/Head Group
                     { id: 'ptQty', index: colMap.ptQty, name: 'PT Qty', format: 'number', headerClass: 'bg-green-100 text-green-900 border-t border-green-200' },
                     { id: 'todayPtQty', index: colMap.todayPtQty, name: '今天 PT QTY', format: 'number', headerClass: 'bg-green-100 text-green-900 border-t border-green-200' },
-                    { id: 'fullCourseQty', index: colMap.fullCourseQty, name: '今天 Full course', format: 'number', headerClass: 'bg-green-100 text-green-900 border-t border-green-200' },
+                    { id: 'todayFullCourseQty', index: colMap.todayFullCourseQty, name: '今天 Full course', format: 'number', headerClass: 'bg-green-100 text-green-900 border-t border-green-200' }, // Replaced with todayFullCourseQty mapping
                     { id: 'paidTrialLongTail', index: colMap.paidTrialLongTail, name: 'Paid Trial 龍尾 Book', format: 'number', headerClass: 'bg-green-100 text-green-900 border-t border-green-200' },
                     
                     // 200% Purple Light Group
@@ -335,7 +346,7 @@
                     { id: 'todaySales', index: colMap.todaySales, name: '今天銷售額', format: 'currency', headerClass: 'bg-purple-100 text-purple-900 border-t border-purple-200' }
                 ].map(kpi => ({
                     ...kpi,
-                    displayName: (headers[kpi.index] && headers[kpi.index].trim() !== '') ? headers[kpi.index].replace(/"/g, '') : kpi.name
+                    displayName: (headers[kpi.index] && headers[kpi.index].trim() !== '') ? headers[kpi.index].replace(/[\r\n]+/g, ' ').replace(/"/g, '') : kpi.name
                 }));
             }, [colMap, headers]);
 
@@ -434,7 +445,7 @@
                     sums.ptQty = parseNumber(grandTotalRow[colMap.ptQty]);        
                     sums.todayPtQty = parseNumber(grandTotalRow[colMap.todayPtQty]);   
                     sums.fullCourseQty = parseNumber(grandTotalRow[colMap.fullCourseQty]);
-                    sums.todayFullCourseQty = parseNumber(grandTotalRow[colMap.fullCourseQty + 1]); 
+                    sums.todayFullCourseQty = parseNumber(grandTotalRow[colMap.todayFullCourseQty]); 
                     sums.paidTrialLongTail = parseNumber(grandTotalRow[colMap.paidTrialLongTail]);  
                     sums.highPexoTodaySales = parseNumber(grandTotalRow[colMap.highPexoTodaySales]); 
                     sums.fullCourseMoney = parseNumber(grandTotalRow[colMap.fullCourseMoney]);    
@@ -450,9 +461,9 @@
                         
                         sums.ptQty += item.ptQty;
                         sums.todayPtQty += item.todayPtQty;
-                        sums.fullCourseQty += item.fullCourseQty;
                         
-                        sums.todayFullCourseQty += parseNumber(item.raw[colMap.fullCourseQty + 1]); 
+                        sums.fullCourseQty += parseNumber(item.raw[colMap.fullCourseQty]);
+                        sums.todayFullCourseQty += item.todayFullCourseQty; 
                         
                         sums.paidTrialLongTail += item.paidTrialLongTail;
                         sums.highPexoTodaySales += parseNumber(item.raw[colMap.highPexoTodaySales]);
