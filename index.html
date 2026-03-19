@@ -819,12 +819,12 @@
                                     
                                     {/* Sortable Custom KPI Headers mapping their specific background classes */}
                                     {activeKPIs.map(kpi => (
-                                        <th key={kpi.id} onClick={() => requestSort(kpi.id)} className={`px-4 py-3 font-bold cursor-pointer hover:opacity-80 transition-opacity border-b border-r border-black/5 text-center group align-top ${kpi.headerClass}`}>
-                                            <div className="flex items-center justify-center gap-1">
-                                                <span className="truncate max-w-[120px]" title={kpi.displayName}>{kpi.displayName}</span>
+                                        <th key={kpi.id} onClick={() => requestSort(kpi.id)} className={`px-2 py-3 font-bold cursor-pointer hover:opacity-80 transition-opacity border-b border-r border-black/5 text-center group align-top min-w-[110px] ${kpi.headerClass}`}>
+                                            <div className="flex items-center justify-center gap-1 h-full">
+                                                <span className="whitespace-normal break-words leading-snug" title={kpi.displayName}>{kpi.displayName}</span>
                                                 {sortConfig.key === kpi.id ? (
-                                                    sortConfig.direction === 'asc' ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />
-                                                ) : <ChevronDown className="w-4 h-4 opacity-0 group-hover:opacity-40" />}
+                                                    sortConfig.direction === 'asc' ? <ChevronUp className="w-4 h-4 flex-shrink-0" /> : <ChevronDown className="w-4 h-4 flex-shrink-0" />
+                                                ) : <ChevronDown className="w-4 h-4 opacity-0 group-hover:opacity-40 flex-shrink-0" />}
                                             </div>
                                         </th>
                                     ))}
