@@ -1,2 +1,0 @@
-# HighPlasma
-High Plasma
