@@ -96,7 +96,7 @@
                 else if (num >= 1) className += 'bg-yellow-200';
                 else className += 'bg-red-200';
             }
-            else if (colName === 'PT Qty' || colName === '今天 PT QTY') {
+            else if (colName === 'PT Qty' || colName === '今天 PT QTY' || colName === 'Full course Qty.') {
                 if (num >= 3) className += 'bg-green-200';
                 else if (num >= 1) className += 'bg-yellow-200';
                 else className += 'bg-red-200';
@@ -338,6 +338,7 @@
                     // High Pexo PT/Head Group
                     { id: 'ptQty', index: colMap.ptQty, name: 'PT Qty', format: 'number', headerClass: 'bg-green-100 text-green-900 border-t border-green-200' },
                     { id: 'todayPtQty', index: colMap.todayPtQty, name: '今天 PT QTY', format: 'number', headerClass: 'bg-green-100 text-green-900 border-t border-green-200' },
+                    { id: 'fullCourseQty', index: colMap.fullCourseQty, name: 'Full course Qty.', format: 'number', headerClass: 'bg-green-100 text-green-900 border-t border-green-200' },
                     { id: 'todayFullCourseQty', index: colMap.todayFullCourseQty, name: '今天 Full course', format: 'number', headerClass: 'bg-green-100 text-green-900 border-t border-green-200' }, // Replaced with todayFullCourseQty mapping
                     { id: 'paidTrialLongTail', index: colMap.paidTrialLongTail, name: 'Paid Trial 龍尾 Book', format: 'number', headerClass: 'bg-green-100 text-green-900 border-t border-green-200' },
                     
@@ -765,7 +766,7 @@
                                         862+ICB
                                     </th>
                                     
-                                    <th colSpan="4" className="bg-[#4caf50] text-white text-center font-bold py-2.5 border-r border-green-700 text-[13px] tracking-wide">
+                                    <th colSpan="5" className="bg-[#4caf50] text-white text-center font-bold py-2.5 border-r border-green-700 text-[13px] tracking-wide">
                                         High Pexo PT/Head
                                     </th>
                                     
