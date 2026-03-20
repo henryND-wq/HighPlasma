@@ -151,7 +151,6 @@
             const [loading, setLoading] = useState(true);
             const [error, setError] = useState(null);
 
-            const [globalSummary, setGlobalSummary] = useState({ totalNodes: 0, nodeDelta: 0, identitiesB5: 1 });
             const [grandTotalRow, setGrandTotalRow] = useState(null);
             const [mtdTargetRatio, setMtdTargetRatio] = useState(null);
 
@@ -169,48 +168,17 @@
                     const sheetId = GOOGLE_SHEET_ID;
                     
                     const urls = [
-                    `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&sheet=real%20time`,
-                    `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&sheet=Overview`,
-                    `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&sheet=Identities`,
-                    `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&sheet=Test%20Overview`
+                    `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&sheet=(WEB)Real%20Time`
                     ];
 
-                    const [realTimeRes, overviewRes, identitiesRes, testOverviewRes] = await Promise.all(
+                    const [realTimeRes] = await Promise.all(
                         urls.map(url => fetch(url))
                     );
 
                     if (!realTimeRes.ok) throw new Error("Could not fetch the sheet. Please ensure it's set to 'Anyone with the link can view'.");
                     
                     const realTimeCsv = await realTimeRes.text();
-                    const overviewCsv = await overviewRes.text();
-                    const identitiesCsv = await identitiesRes.text();
-                    const testOverviewCsv = await testOverviewRes.text();
-
                     const realTimeParsed = parseCSV(realTimeCsv);
-                    const overviewParsed = parseCSV(overviewCsv);
-                    const identitiesParsed = parseCSV(identitiesCsv);
-                    const testOverviewParsed = parseCSV(testOverviewCsv);
-
-                    // --- 1. EXTRACT DATA FOR GLOBAL SUMMARY PANEL ---
-                    let totalNodes = 0;
-                    let nodeDelta = 0;
-                    
-                    // Fetch Total Nodes from Overview
-                    overviewParsed.forEach(row => {
-                        if (row[0] === 'Nodes') totalNodes = parseNumber(row[1]);
-                    });
-
-                    // Fetch Node 3 Days Changes from Test Overview
-                    testOverviewParsed.forEach(row => {
-                        if (row[0] === 'Nodes_3Day') nodeDelta = parseNumber(row[1]); 
-                    });
-
-                    let identitiesB5 = 1;
-                    if (identitiesParsed.length > 4 && identitiesParsed[4].length > 1) {
-                        identitiesB5 = parseNumber(identitiesParsed[4][1]) || 1; 
-                    }
-
-                    setGlobalSummary({ totalNodes, nodeDelta, identitiesB5 });
 
                     // Find Grand Total row for fallback calculations
                     const gtRow = realTimeParsed.find(row => row[2] === 'Grand Total');
@@ -245,9 +213,9 @@
                         center: getDynamicIndex(extractedHeaders, ['Center'], 2),
                         therapist: getDynamicIndex(extractedHeaders, ['Therapist'], 3),
                         
-                        node: getDynamicIndex(extractedHeaders, ['Node'], 22), // W
-                        avgNode: getDynamicIndex(extractedHeaders, ['平均每人'], 24), // Y
-                        node3Days: getDynamicIndex(extractedHeaders, ['3天增加'], 26), // AA
+                        node: getDynamicIndex(extractedHeaders, ['Node', 'Nodes'], 22), // W
+                        avgNode: getDynamicIndex(extractedHeaders, ['平均每人分發點數量', '平均每人'], 24), // Y
+                        node3Days: getDynamicIndex(extractedHeaders, ['3天增加', 'Node 3 Days Changes'], 26), // AA
                         
                         futureICB: getDynamicIndex(extractedHeaders, ['未來 ICB Booking', '未來 ICB'], 13), // N
                         avgFutureICB: getDynamicIndex(extractedHeaders, ['未來 人均', 'CB Booking', 'ICB Booking'], 14), // O
@@ -293,13 +261,13 @@
 
                 } catch (err) {
                     setError(err.message);
-                    setGlobalSummary({ totalNodes: 862, nodeDelta: 12, identitiesB5: 4.31 });
                     
                     setColMap({ brand: 0, center: 2, therapist: 3, node: 22, avgNode: 24, node3Days: 26, futureICB: 13, avgFutureICB: 14, todayNewICB: 15, monthlyActive: 17, ptQty: 27, todayPtQty: 28, fullCourseQty: 30, todayFullCourseQty: 33, paidTrialLongTail: 35, highPexoTodaySales: 34, fullCourseMoney: 32, todayMtdPercent: 45, todaySales: 49 });
                     setMtdTargetRatio(1.2); 
 
                     let mockGt = new Array(70).fill('0');
                     mockGt[13] = '342'; mockGt[14] = '1.2'; mockGt[15] = '45'; mockGt[17] = '280';
+                    mockGt[22] = '862'; mockGt[24] = '200'; mockGt[26] = '12';
                     mockGt[27] = '120'; mockGt[28] = '15'; mockGt[30] = '60'; mockGt[33] = '8'; mockGt[35] = '35'; mockGt[34] = '45000'; mockGt[32] = '125000'; 
                     mockGt[45] = '42.5'; mockGt[49] = '35000';
                     setGrandTotalRow(mockGt);
@@ -429,15 +397,20 @@
                 const isFiltered = selectedBrand !== 'All' || selectedCenter !== 'All' || selectedTherapist !== 'All' || searchTerm !== '';
                 
                 let sums = {
+                    totalNodes: 0, nodeDelta: 0, avgNode: 0,
                     futureICB: 0, avgFutureICB: 0, todayNewICB: 0, monthlyActive: 0,
                     ptQty: 0, todayPtQty: 0, fullCourseQty: 0, todayFullCourseQty: 0, paidTrialLongTail: 0,
                     highPexoTodaySales: 0,
                     fullCourseMoney: 0, todayMtdPercent: 0, todaySales: 0
                 };
 
-                if (!colMap) return { ...globalSummary, ...sums };
+                if (!colMap) return sums;
 
                 if (!isFiltered && grandTotalRow) {
+                    sums.totalNodes = parseNumber(grandTotalRow[colMap.node]);
+                    sums.nodeDelta = parseNumber(grandTotalRow[colMap.node3Days]);
+                    sums.avgNode = parseNumber(grandTotalRow[colMap.avgNode]);
+                    
                     sums.futureICB = parseNumber(grandTotalRow[colMap.futureICB]);
                     sums.avgFutureICB = parseNumber(grandTotalRow[colMap.avgFutureICB]);
                     sums.todayNewICB = parseNumber(grandTotalRow[colMap.todayNewICB]);
@@ -455,6 +428,10 @@
                     sums.todaySales = parseNumber(grandTotalRow[colMap.todaySales]);         
                 } else {
                     processedData.forEach(item => {
+                        sums.totalNodes += item.node;
+                        sums.nodeDelta += item.node3Days;
+                        sums.avgNode += item.avgNode;
+                        
                         sums.futureICB += item.futureICB;
                         sums.avgFutureICB += item.avgFutureICB; 
                         sums.todayNewICB += item.todayNewICB;
@@ -477,11 +454,12 @@
                     if (processedData.length > 0) {
                         sums.todayMtdPercent = sums.todayMtdPercent / processedData.length;
                         sums.avgFutureICB = sums.avgFutureICB / processedData.length; 
+                        sums.avgNode = sums.avgNode / processedData.length; 
                     }
                 }
 
-                return { ...globalSummary, ...sums };
-            }, [selectedBrand, selectedCenter, selectedTherapist, searchTerm, processedData, grandTotalRow, globalSummary, colMap]);
+                return sums;
+            }, [selectedBrand, selectedCenter, selectedTherapist, searchTerm, processedData, grandTotalRow, colMap]);
 
             const requestSort = (key) => {
                 let direction = 'asc';
@@ -633,7 +611,7 @@
                             </div>
                             <div className="bg-white/70 border border-white/50 rounded-lg p-2 flex-1 flex flex-col justify-center items-center text-center shadow-inner">
                                 <span className="text-xl font-extrabold text-gray-800">
-                                    {(summaryData.totalNodes / (summaryData.identitiesB5 || 1)).toFixed(1)}
+                                    {summaryData.avgNode.toFixed(1)}
                                 </span>
                                 <span className="text-xs text-gray-700 font-bold uppercase mt-1 leading-tight">平均每人<br/>分發點數量</span>
                             </div>
