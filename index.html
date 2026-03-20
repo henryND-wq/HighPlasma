@@ -299,7 +299,9 @@
             const summaryBrandsList = useMemo(() => {
                 if (!colMap) return [];
                 const validRows = data.filter(r => r[colMap.center] !== 'Grand Total');
-                return ['All', ...new Set(validRows.map(r => r[colMap.brand]).filter(Boolean))];
+                const bList = [...new Set(validRows.map(r => r[colMap.brand]).filter(Boolean))]
+                    .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+                return ['All', ...bList];
             }, [data, colMap]);
 
             const summaryCentersList = useMemo(() => {
@@ -309,13 +311,20 @@
                 
                 const isRestricted = ['dermes', 'elyze', 'reenex'].includes(summaryBrand.toLowerCase());
                 
-                let cList = [...new Set(brandFiltered.map(r => r[colMap.center]).filter(Boolean))];
+                let rawList = [...new Set(brandFiltered.map(r => r[colMap.center]).filter(Boolean))];
+                const hasTotal = rawList.some(c => c.toLowerCase() === 'total');
+                
+                let sortedCList = rawList
+                    .filter(c => c.toLowerCase() !== 'total')
+                    .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+                
+                if (hasTotal) sortedCList = ['Total', ...sortedCList];
                 
                 if (isRestricted) {
                     // Hide 'All Floor Levels', explicitly allow 'Total'
-                    return cList;
+                    return sortedCList;
                 } else {
-                    cList = ['All', ...cList];
+                    let cList = ['All', ...sortedCList];
                     // Hide Total if Brand is 'All'
                     if (summaryBrand === 'All') {
                         cList = cList.filter(c => c.toLowerCase() !== 'total');
@@ -332,13 +341,20 @@
                 
                 const isRestricted = ['dermes', 'elyze', 'reenex'].includes(summaryBrand.toLowerCase());
                 
-                let tList = [...new Set(centerFiltered.map(r => r[colMap.therapist]).filter(Boolean))];
+                let rawList = [...new Set(centerFiltered.map(r => r[colMap.therapist]).filter(Boolean))];
+                const hasTotal = rawList.some(t => t.toLowerCase() === 'total');
+                
+                let sortedTList = rawList
+                    .filter(t => t.toLowerCase() !== 'total')
+                    .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+
+                if (hasTotal) sortedTList = ['Total', ...sortedTList];
 
                 if (isRestricted) {
                     // Keep 'Total' available, but explicitly hide 'All Therapists'
-                    return tList;
+                    return sortedTList;
                 } else {
-                    tList = ['All', ...tList];
+                    let tList = ['All', ...sortedTList];
                     // Hide Total if Brand is 'All'
                     if (summaryBrand === 'All') {
                         tList = tList.filter(t => t.toLowerCase() !== 'total');
@@ -351,14 +367,25 @@
             const tableBrandsList = useMemo(() => {
                 if (!colMap) return [];
                 const validRows = data.filter(r => r[colMap.center] !== 'Grand Total');
-                return ['All', ...new Set(validRows.map(r => r[colMap.brand]).filter(Boolean))];
+                const bList = [...new Set(validRows.map(r => r[colMap.brand]).filter(Boolean))]
+                    .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+                return ['All', ...bList];
             }, [data, colMap]);
 
             const tableCentersList = useMemo(() => {
                 if (!colMap) return [];
                 const validRows = data.filter(r => r[colMap.center] !== 'Grand Total');
                 const brandFiltered = tableBrand === 'All' ? validRows : validRows.filter(r => r[colMap.brand] === tableBrand);
-                return ['All', ...new Set(brandFiltered.map(r => r[colMap.center]).filter(Boolean))];
+                
+                let rawList = [...new Set(brandFiltered.map(r => r[colMap.center]).filter(Boolean))];
+                const hasTotal = rawList.some(c => c.toLowerCase() === 'total');
+                
+                let sortedCList = rawList
+                    .filter(c => c.toLowerCase() !== 'total')
+                    .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+                
+                if (hasTotal) sortedCList = ['Total', ...sortedCList];
+                return ['All', ...sortedCList];
             }, [data, tableBrand, colMap]);
 
             const tableTherapistsList = useMemo(() => {
@@ -366,7 +393,16 @@
                 const validRows = data.filter(r => r[colMap.center] !== 'Grand Total');
                 let brandFiltered = tableBrand === 'All' ? validRows : validRows.filter(r => r[colMap.brand] === tableBrand);
                 let centerFiltered = tableCenter === 'All' ? brandFiltered : brandFiltered.filter(r => r[colMap.center] === tableCenter);
-                return ['All', ...new Set(centerFiltered.map(r => r[colMap.therapist]).filter(Boolean))];
+                
+                let rawList = [...new Set(centerFiltered.map(r => r[colMap.therapist]).filter(Boolean))];
+                const hasTotal = rawList.some(t => t.toLowerCase() === 'total');
+                
+                let sortedTList = rawList
+                    .filter(t => t.toLowerCase() !== 'total')
+                    .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+                
+                if (hasTotal) sortedTList = ['Total', ...sortedTList];
+                return ['All', ...sortedTList];
             }, [data, tableBrand, tableCenter, colMap]);
 
 
