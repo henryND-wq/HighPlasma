@@ -61,7 +61,6 @@
             return isNaN(num) ? 0 : num;
         };
 
-        // Short form formatting for K and M
         const formatShortCurrency = (val) => {
             if (val === undefined || isNaN(val)) return '-';
             if (val >= 1000000) return '$' + (val / 1000000).toFixed(1) + 'M';
@@ -102,42 +101,33 @@
                 else className += 'bg-red-200';
             }
             else if (colName === 'Today MTD%') {
-                // Multiplied targetRatio by 100 to map accurately to percentage display numbers (e.g. 100%)
                 if (targetRatio && num > (targetRatio * 100)) className += 'bg-purple-300 font-bold';
                 else if (num >= 100) className += 'bg-green-200';
                 else if (num >= 90) className += 'bg-yellow-200';
                 else className += 'bg-red-200';
             }
             else if (['未來 ICB Booking', '當月 激活人數', '今天 Full course', 'Paid Trial 龍尾 Book'].includes(colName)) {
-                // Color Gradient (Low to High = Red to Green)
                 const range = ranges[colName];
                 if (range && range.max > range.min) {
                     const ratio = (num - range.min) / (range.max - range.min);
-                    const hue = ratio * 120; // 0 is Red, 120 is Green
+                    const hue = ratio * 120;
                     style.backgroundColor = `hsl(${hue}, 80%, 85%)`;
                 } else if (range && range.max === range.min && range.max > 0) {
-                    style.backgroundColor = `hsl(120, 80%, 85%)`; // solid green if all are equal max
+                    style.backgroundColor = `hsl(120, 80%, 85%)`;
                 }
             }
 
             return { className, style };
         };
 
-        // --- DYNAMIC MAPPING HELPERS ---
         function getDynamicIndex(headers, searchTerms, fallbackIndex) {
-            // First pass: Exact match (ignoring newlines from sheets)
             for (let i = 0; i < headers.length; i++) {
                 const h = (headers[i] || '').replace(/[\r\n]+/g, ' ').replace(/"/g, '').trim().toLowerCase();
-                if (searchTerms.some(term => h === term.toLowerCase())) {
-                    return i;
-                }
+                if (searchTerms.some(term => h === term.toLowerCase())) return i;
             }
-            // Second pass: Includes partial match
             for (let i = 0; i < headers.length; i++) {
                 const h = (headers[i] || '').replace(/[\r\n]+/g, ' ').replace(/"/g, '').trim().toLowerCase();
-                if (searchTerms.some(term => h.includes(term.toLowerCase()))) {
-                    return i;
-                }
+                if (searchTerms.some(term => h.includes(term.toLowerCase()))) return i;
             }
             return fallbackIndex;
         }
@@ -147,18 +137,24 @@
         function App() {
             const [data, setData] = useState([]);
             const [headers, setHeaders] = useState([]);
-            const [colMap, setColMap] = useState(null); // Holds dynamic indices
+            const [colMap, setColMap] = useState(null);
             const [loading, setLoading] = useState(true);
             const [error, setError] = useState(null);
 
             const [grandTotalRow, setGrandTotalRow] = useState(null);
             const [mtdTargetRatio, setMtdTargetRatio] = useState(null);
-
-            const [searchTerm, setSearchTerm] = useState('');
-            const [selectedBrand, setSelectedBrand] = useState('All');
-            const [selectedCenter, setSelectedCenter] = useState('All');
-            const [selectedTherapist, setSelectedTherapist] = useState('All');
             const [lastSyncTime, setLastSyncTime] = useState(null);
+
+            // --- STATE: SUMMARY PANEL FILTERS ---
+            const [summaryBrand, setSummaryBrand] = useState('All');
+            const [summaryCenter, setSummaryCenter] = useState('All');
+            const [summaryTherapist, setSummaryTherapist] = useState('All');
+            const [summarySearchTerm, setSummarySearchTerm] = useState('');
+
+            // --- STATE: DETAILED TABLE FILTERS ---
+            const [tableBrand, setTableBrand] = useState('All');
+            const [tableCenter, setTableCenter] = useState('All');
+            const [tableTherapist, setTableTherapist] = useState('All');
             
             const [sortConfig, setSortConfig] = useState({ key: null, direction: 'asc' });
 
@@ -167,36 +163,25 @@
                     setLoading(true);
                     const sheetId = GOOGLE_SHEET_ID;
                     
-                    const urls = [
-                    `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&sheet=(WEB)Real%20Time`
-                    ];
-
-                    const [realTimeRes] = await Promise.all(
-                        urls.map(url => fetch(url))
-                    );
+                    const urls = [`https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&sheet=(WEB)Real%20Time`];
+                    const [realTimeRes] = await Promise.all(urls.map(url => fetch(url)));
 
                     if (!realTimeRes.ok) throw new Error("Could not fetch the sheet. Please ensure it's set to 'Anyone with the link can view'.");
                     
                     const realTimeCsv = await realTimeRes.text();
                     const realTimeParsed = parseCSV(realTimeCsv);
 
-                    // Find Grand Total row for fallback calculations
                     const gtRow = realTimeParsed.find(row => row[2] === 'Grand Total');
                     if (gtRow) setGrandTotalRow(gtRow);
 
-                    // Extract target ratio from BJ3 / BM2 * 1.5
-                    // BJ = index 61, BM = index 64. Row 2 = index 1, Row 3 = index 2
                     let targetRatio = null;
                     if (realTimeParsed.length > 2) {
                         const bj3 = parseNumber(realTimeParsed[2][61]);
                         const bm2 = parseNumber(realTimeParsed[1][64]);
-                        if (bm2 > 0) {
-                            targetRatio = (bj3 / bm2) * 1.5;
-                        }
+                        if (bm2 > 0) targetRatio = (bj3 / bm2) * 1.5;
                     }
                     setMtdTargetRatio(targetRatio);
 
-                    // --- 2. EXTRACT HEADER INDICES DYNAMICALLY ---
                     let headerRowIdx = 0;
                     for (let i = 0; i < Math.min(10, realTimeParsed.length); i++) {
                         if (realTimeParsed[i].some(cell => cell.toLowerCase().includes('brand') || cell.toLowerCase().includes('center'))) {
@@ -207,36 +192,34 @@
 
                     const extractedHeaders = realTimeParsed[headerRowIdx];
                     
-                    // Core Mapping - Array strings are fallbacks to find headers if they shift
                     const mappedIndices = {
                         brand: getDynamicIndex(extractedHeaders, ['Brand'], 0),
                         center: getDynamicIndex(extractedHeaders, ['Center'], 2),
                         therapist: getDynamicIndex(extractedHeaders, ['Therapist'], 3),
                         
-                        node: getDynamicIndex(extractedHeaders, ['Node', 'Nodes'], 22), // W
-                        avgNode: getDynamicIndex(extractedHeaders, ['平均每人分發點數量', '平均每人'], 24), // Y
-                        node3Days: getDynamicIndex(extractedHeaders, ['3天增加', 'Node 3 Days Changes'], 26), // AA
+                        node: getDynamicIndex(extractedHeaders, ['Node', 'Nodes'], 22), 
+                        avgNode: getDynamicIndex(extractedHeaders, ['平均每人分發點數量', '平均每人'], 24), 
+                        node3Days: getDynamicIndex(extractedHeaders, ['3天增加', 'Node 3 Days Changes'], 26), 
                         
-                        futureICB: getDynamicIndex(extractedHeaders, ['未來 ICB Booking', '未來 ICB'], 13), // N
-                        avgFutureICB: getDynamicIndex(extractedHeaders, ['未來 人均', 'CB Booking', 'ICB Booking'], 14), // O
-                        todayNewICB: getDynamicIndex(extractedHeaders, ['今天新增', 'CB Booking', 'ICB Booking'], 15), // P
-                        monthlyActive: getDynamicIndex(extractedHeaders, ['當月 激活人數', '激活人數'], 17), // R
+                        futureICB: getDynamicIndex(extractedHeaders, ['未來 ICB Booking', '未來 ICB'], 13), 
+                        avgFutureICB: getDynamicIndex(extractedHeaders, ['未來 人均', 'CB Booking', 'ICB Booking'], 14), 
+                        todayNewICB: getDynamicIndex(extractedHeaders, ['今天新增', 'CB Booking', 'ICB Booking'], 15), 
+                        monthlyActive: getDynamicIndex(extractedHeaders, ['當月 激活人數', '激活人數'], 17), 
                         
-                        ptQty: getDynamicIndex(extractedHeaders, ['PT Qty'], 27), // AB
-                        todayPtQty: getDynamicIndex(extractedHeaders, ['今天 PT QTY'], 28), // AC
+                        ptQty: getDynamicIndex(extractedHeaders, ['PT Qty'], 27), 
+                        todayPtQty: getDynamicIndex(extractedHeaders, ['今天 PT QTY'], 28), 
                         
-                        fullCourseQty: getDynamicIndex(extractedHeaders, ['Full course Qty.', 'Full course Qty'], 30), // AE
-                        todayFullCourseQty: getDynamicIndex(extractedHeaders, ['今天 Full course'], 33), // AH - Updated
-                        paidTrialLongTail: getDynamicIndex(extractedHeaders, ['Paid Trial 龍尾 Book', '龍尾 Book'], 35), // AJ - Updated
-                        highPexoTodaySales: getDynamicIndex(extractedHeaders, ['Today $', '今日銷售', 'Today$'], 34), // AI - Updated
-                        fullCourseMoney: getDynamicIndex(extractedHeaders, ['$'], 32), // AG - Updated
+                        fullCourseQty: getDynamicIndex(extractedHeaders, ['Full course Qty.', 'Full course Qty'], 30), 
+                        todayFullCourseQty: getDynamicIndex(extractedHeaders, ['今天 Full course'], 33), 
+                        paidTrialLongTail: getDynamicIndex(extractedHeaders, ['Paid Trial 龍尾 Book', '龍尾 Book'], 35), 
+                        highPexoTodaySales: getDynamicIndex(extractedHeaders, ['Today $', '今日銷售', 'Today$'], 34), 
+                        fullCourseMoney: getDynamicIndex(extractedHeaders, ['$'], 32), 
                         
-                        todayMtdPercent: getDynamicIndex(extractedHeaders, ['Today MTD%'], 45), // AT
-                        todaySales: getDynamicIndex(extractedHeaders, ['今天銷售額', '今日銷售'], 49) // AX
+                        todayMtdPercent: getDynamicIndex(extractedHeaders, ['Today MTD%'], 45), 
+                        todaySales: getDynamicIndex(extractedHeaders, ['今天銷售額', '今日銷售'], 49) 
                     };
                     setColMap(mappedIndices);
 
-                    // Extract and "Fill Down" missing Brands/Centers to fetch Therapist rows correctly
                     const rawData = realTimeParsed.slice(headerRowIdx + 1, 300).filter(row => row.length > 5); 
                     
                     let currentBrand = 'Unknown';
@@ -261,7 +244,6 @@
 
                 } catch (err) {
                     setError(err.message);
-                    
                     setColMap({ brand: 0, center: 2, therapist: 3, node: 22, avgNode: 24, node3Days: 26, futureICB: 13, avgFutureICB: 14, todayNewICB: 15, monthlyActive: 17, ptQty: 27, todayPtQty: 28, fullCourseQty: 30, todayFullCourseQty: 33, paidTrialLongTail: 35, highPexoTodaySales: 34, fullCourseMoney: 32, todayMtdPercent: 45, todaySales: 49 });
                     setMtdTargetRatio(1.2); 
 
@@ -287,30 +269,24 @@
                 fetchData();
             }, [fetchData]);
 
-            // Constructing Active KPI Table Definitions Dynamically
             const activeKPIs = useMemo(() => {
                 if (!colMap) return [];
-                
                 return [
-                    // 200 Nodes Group
                     { id: 'node', index: colMap.node, name: 'Node', format: 'number', headerClass: 'bg-blue-100 text-blue-900 border-t border-blue-200' },
                     { id: 'avgNode', index: colMap.avgNode, name: '平均每人', format: 'number', headerClass: 'bg-blue-100 text-blue-900 border-t border-blue-200' },
                     { id: 'node3Days', index: colMap.node3Days, name: '3天增加', format: 'number', headerClass: 'bg-blue-100 text-blue-900 border-t border-blue-200' },
                     
-                    // 862+ICB Group
                     { id: 'futureICB', index: colMap.futureICB, name: '未來 ICB Booking', format: 'number', headerClass: 'bg-orange-100 text-orange-900 border-t border-orange-200' },
                     { id: 'avgFutureICB', index: colMap.avgFutureICB, name: '未來 人均 ICB Booking', format: 'number', headerClass: 'bg-orange-100 text-orange-900 border-t border-orange-200' },
                     { id: 'todayNewICB', index: colMap.todayNewICB, name: '今天新增 ICB Booking', format: 'number', headerClass: 'bg-orange-100 text-orange-900 border-t border-orange-200' },
                     { id: 'monthlyActive', index: colMap.monthlyActive, name: '當月 激活人數', format: 'number', headerClass: 'bg-orange-100 text-orange-900 border-t border-orange-200' },
                     
-                    // High Pexo PT/Head Group
                     { id: 'ptQty', index: colMap.ptQty, name: 'PT Qty', format: 'number', headerClass: 'bg-green-100 text-green-900 border-t border-green-200' },
                     { id: 'todayPtQty', index: colMap.todayPtQty, name: '今天 PT QTY', format: 'number', headerClass: 'bg-green-100 text-green-900 border-t border-green-200' },
                     { id: 'fullCourseQty', index: colMap.fullCourseQty, name: 'Full course Qty.', format: 'number', headerClass: 'bg-green-100 text-green-900 border-t border-green-200' },
-                    { id: 'todayFullCourseQty', index: colMap.todayFullCourseQty, name: '今天 Full course', format: 'number', headerClass: 'bg-green-100 text-green-900 border-t border-green-200' }, // Replaced with todayFullCourseQty mapping
+                    { id: 'todayFullCourseQty', index: colMap.todayFullCourseQty, name: '今天 Full course', format: 'number', headerClass: 'bg-green-100 text-green-900 border-t border-green-200' }, 
                     { id: 'paidTrialLongTail', index: colMap.paidTrialLongTail, name: 'Paid Trial 龍尾 Book', format: 'number', headerClass: 'bg-green-100 text-green-900 border-t border-green-200' },
                     
-                    // 200% Purple Light Group
                     { id: 'todayMtdPercent', index: colMap.todayMtdPercent, name: 'Today MTD%', format: 'percent', headerClass: 'bg-purple-100 text-purple-900 border-t border-purple-200' },
                     { id: 'todaySales', index: colMap.todaySales, name: '今天銷售額', format: 'currency', headerClass: 'bg-purple-100 text-purple-900 border-t border-purple-200' }
                 ].map(kpi => ({
@@ -319,35 +295,106 @@
                 }));
             }, [colMap, headers]);
 
-            const brands = useMemo(() => {
+            // --- DROPDOWN LISTS FOR SUMMARY (WITH RULES) ---
+            const summaryBrandsList = useMemo(() => {
                 if (!colMap) return [];
                 const validRows = data.filter(r => r[colMap.center] !== 'Grand Total');
                 return ['All', ...new Set(validRows.map(r => r[colMap.brand]).filter(Boolean))];
             }, [data, colMap]);
 
-            const centers = useMemo(() => {
+            const summaryCentersList = useMemo(() => {
                 if (!colMap) return [];
                 const validRows = data.filter(r => r[colMap.center] !== 'Grand Total');
-                const brandFiltered = selectedBrand === 'All' ? validRows : validRows.filter(r => r[colMap.brand] === selectedBrand);
+                const brandFiltered = summaryBrand === 'All' ? validRows : validRows.filter(r => r[colMap.brand] === summaryBrand);
+                
+                const isRestricted = ['dermes', 'elyze', 'reenex'].includes(summaryBrand.toLowerCase());
+                
+                let cList = [...new Set(brandFiltered.map(r => r[colMap.center]).filter(Boolean))];
+                
+                if (isRestricted) {
+                    // Hide 'All Floor Levels', explicitly allow 'Total'
+                    return cList;
+                } else {
+                    cList = ['All', ...cList];
+                    // Hide Total if Brand is 'All'
+                    if (summaryBrand === 'All') {
+                        cList = cList.filter(c => c.toLowerCase() !== 'total');
+                    }
+                    return cList;
+                }
+            }, [data, summaryBrand, colMap]);
+
+            const summaryTherapistsList = useMemo(() => {
+                if (!colMap) return [];
+                const validRows = data.filter(r => r[colMap.center] !== 'Grand Total');
+                let brandFiltered = summaryBrand === 'All' ? validRows : validRows.filter(r => r[colMap.brand] === summaryBrand);
+                let centerFiltered = summaryCenter === 'All' ? brandFiltered : brandFiltered.filter(r => r[colMap.center] === summaryCenter);
+                
+                const isRestricted = ['dermes', 'elyze', 'reenex'].includes(summaryBrand.toLowerCase());
+                
+                let tList = [...new Set(centerFiltered.map(r => r[colMap.therapist]).filter(Boolean))];
+
+                if (isRestricted) {
+                    // Keep 'Total' available, but explicitly hide 'All Therapists'
+                    return tList;
+                } else {
+                    tList = ['All', ...tList];
+                    // Hide Total if Brand is 'All'
+                    if (summaryBrand === 'All') {
+                        tList = tList.filter(t => t.toLowerCase() !== 'total');
+                    }
+                    return tList;
+                }
+            }, [data, summaryBrand, summaryCenter, colMap]);
+
+            // --- DROPDOWN LISTS FOR TABLE (NO RESTRICTIONS) ---
+            const tableBrandsList = useMemo(() => {
+                if (!colMap) return [];
+                const validRows = data.filter(r => r[colMap.center] !== 'Grand Total');
+                return ['All', ...new Set(validRows.map(r => r[colMap.brand]).filter(Boolean))];
+            }, [data, colMap]);
+
+            const tableCentersList = useMemo(() => {
+                if (!colMap) return [];
+                const validRows = data.filter(r => r[colMap.center] !== 'Grand Total');
+                const brandFiltered = tableBrand === 'All' ? validRows : validRows.filter(r => r[colMap.brand] === tableBrand);
                 return ['All', ...new Set(brandFiltered.map(r => r[colMap.center]).filter(Boolean))];
-            }, [data, selectedBrand, colMap]);
+            }, [data, tableBrand, colMap]);
 
-            const therapists = useMemo(() => {
+            const tableTherapistsList = useMemo(() => {
                 if (!colMap) return [];
                 const validRows = data.filter(r => r[colMap.center] !== 'Grand Total');
-                let brandFiltered = selectedBrand === 'All' ? validRows : validRows.filter(r => r[colMap.brand] === selectedBrand);
-                let centerFiltered = selectedCenter === 'All' ? brandFiltered : brandFiltered.filter(r => r[colMap.center] === selectedCenter);
+                let brandFiltered = tableBrand === 'All' ? validRows : validRows.filter(r => r[colMap.brand] === tableBrand);
+                let centerFiltered = tableCenter === 'All' ? brandFiltered : brandFiltered.filter(r => r[colMap.center] === tableCenter);
                 return ['All', ...new Set(centerFiltered.map(r => r[colMap.therapist]).filter(Boolean))];
-            }, [data, selectedBrand, selectedCenter, colMap]);
+            }, [data, tableBrand, tableCenter, colMap]);
 
-            const processedData = useMemo(() => {
+
+            // --- FILTERED DATA: SUMMARY ---
+            const summaryProcessedData = useMemo(() => {
                 if (!colMap || activeKPIs.length === 0) return [];
                 let filtered = data.filter(row => row[colMap.center] !== 'Grand Total');
 
-                if (selectedBrand !== 'All') filtered = filtered.filter(row => row[colMap.brand] === selectedBrand);
-                if (selectedCenter !== 'All') filtered = filtered.filter(row => row[colMap.center] === selectedCenter);
-                if (selectedTherapist !== 'All') filtered = filtered.filter(row => row[colMap.therapist] === selectedTherapist);
-                if (searchTerm) filtered = filtered.filter(row => row.join(' ').toLowerCase().includes(searchTerm.toLowerCase()));
+                if (summaryBrand !== 'All') filtered = filtered.filter(row => row[colMap.brand] === summaryBrand);
+                if (summaryCenter !== 'All') filtered = filtered.filter(row => row[colMap.center] === summaryCenter);
+                if (summaryTherapist !== 'All') filtered = filtered.filter(row => row[colMap.therapist] === summaryTherapist);
+                if (summarySearchTerm) filtered = filtered.filter(row => row.join(' ').toLowerCase().includes(summarySearchTerm.toLowerCase()));
+
+                return filtered.map((row, idx) => {
+                    let mapped = { raw: row };
+                    activeKPIs.forEach(kpi => { mapped[kpi.id] = parseNumber(row[kpi.index]); });
+                    return mapped;
+                });
+            }, [data, summarySearchTerm, summaryBrand, summaryCenter, summaryTherapist, activeKPIs, colMap]);
+
+            // --- FILTERED DATA: TABLE ---
+            const tableProcessedData = useMemo(() => {
+                if (!colMap || activeKPIs.length === 0) return [];
+                let filtered = data.filter(row => row[colMap.center] !== 'Grand Total');
+
+                if (tableBrand !== 'All') filtered = filtered.filter(row => row[colMap.brand] === tableBrand);
+                if (tableCenter !== 'All') filtered = filtered.filter(row => row[colMap.center] === tableCenter);
+                if (tableTherapist !== 'All') filtered = filtered.filter(row => row[colMap.therapist] === tableTherapist);
 
                 let result = filtered.map((row, idx) => {
                     let mapped = {
@@ -357,9 +404,7 @@
                         Therapist: row[colMap.therapist] || '', 
                         raw: row
                     };
-                    activeKPIs.forEach(kpi => {
-                        mapped[kpi.id] = parseNumber(row[kpi.index]);
-                    });
+                    activeKPIs.forEach(kpi => { mapped[kpi.id] = parseNumber(row[kpi.index]); });
                     return mapped;
                 });
 
@@ -373,9 +418,10 @@
                     });
                 }
                 return result;
-            }, [data, searchTerm, selectedBrand, selectedCenter, selectedTherapist, sortConfig, activeKPIs, colMap]);
+            }, [data, tableBrand, tableCenter, tableTherapist, sortConfig, activeKPIs, colMap]);
 
-            // Calculate Min/Max Ranges for Color Gradients
+
+            // Calculation of Ranges for Table Gradients
             const colRanges = useMemo(() => {
                 const ranges = {};
                 if (!activeKPIs) return ranges;
@@ -383,7 +429,7 @@
                 ['未來 ICB Booking', '當月 激活人數', '今天 Full course', 'Paid Trial 龍尾 Book'].forEach(colName => {
                     const kpi = activeKPIs.find(c => c.name === colName);
                     if (kpi) {
-                        const vals = processedData.map(r => r[kpi.id]).filter(v => typeof v === 'number' && !isNaN(v));
+                        const vals = tableProcessedData.map(r => r[kpi.id]).filter(v => typeof v === 'number' && !isNaN(v));
                         ranges[colName] = {
                             min: vals.length ? Math.min(...vals) : 0,
                             max: vals.length ? Math.max(...vals) : 100
@@ -391,10 +437,11 @@
                     }
                 });
                 return ranges;
-            }, [processedData, activeKPIs]);
+            }, [tableProcessedData, activeKPIs]);
 
+            // Summary Panel Card Calculations
             const summaryData = useMemo(() => {
-                const isFiltered = selectedBrand !== 'All' || selectedCenter !== 'All' || selectedTherapist !== 'All' || searchTerm !== '';
+                const isFiltered = summaryBrand !== 'All' || summaryCenter !== 'All' || summaryTherapist !== 'All' || summarySearchTerm !== '';
                 
                 let sums = {
                     totalNodes: 0, nodeDelta: 0, avgNode: 0,
@@ -427,7 +474,7 @@
                     sums.todayMtdPercent = parseNumber(grandTotalRow[colMap.todayMtdPercent]);    
                     sums.todaySales = parseNumber(grandTotalRow[colMap.todaySales]);         
                 } else {
-                    processedData.forEach(item => {
+                    summaryProcessedData.forEach(item => {
                         sums.totalNodes += item.node;
                         sums.nodeDelta += item.node3Days;
                         sums.avgNode += item.avgNode;
@@ -451,15 +498,15 @@
                         sums.todaySales += item.todaySales;
                     });
                     
-                    if (processedData.length > 0) {
-                        sums.todayMtdPercent = sums.todayMtdPercent / processedData.length;
-                        sums.avgFutureICB = sums.avgFutureICB / processedData.length; 
-                        sums.avgNode = sums.avgNode / processedData.length; 
+                    if (summaryProcessedData.length > 0) {
+                        sums.todayMtdPercent = sums.todayMtdPercent / summaryProcessedData.length;
+                        sums.avgFutureICB = sums.avgFutureICB / summaryProcessedData.length; 
+                        sums.avgNode = sums.avgNode / summaryProcessedData.length; 
                     }
                 }
 
                 return sums;
-            }, [selectedBrand, selectedCenter, selectedTherapist, searchTerm, processedData, grandTotalRow, colMap]);
+            }, [summaryBrand, summaryCenter, summaryTherapist, summarySearchTerm, summaryProcessedData, grandTotalRow, colMap]);
 
             const requestSort = (key) => {
                 let direction = 'asc';
@@ -477,7 +524,7 @@
             const exportToCSV = () => {
                 const csvHeaders = ['Brand', 'Floor Level (Center)', 'Therapist', ...activeKPIs.map(kpi => kpi.displayName)];
                 
-                const csvRows = processedData.map(row => {
+                const csvRows = tableProcessedData.map(row => {
                     const rowData = [
                         row.Brand,
                         row.Center,
@@ -492,7 +539,6 @@
                     ...csvRows
                 ].join('\n');
                 
-                // Add BOM for UTF-8 compatibility in Excel
                 const blob = new Blob(["\ufeff", csvContent], { type: 'text/csv;charset=utf-8;' });
                 const url = URL.createObjectURL(blob);
                 const link = document.createElement("a");
@@ -515,7 +561,7 @@
             return (
                 <div className="min-h-screen bg-gray-50 p-2 sm:p-4 lg:px-6 xl:px-8 font-sans text-gray-800">
                 
-                {/* Header & Controls */}
+                {/* Header & Controls for Summary Panel ONLY */}
                 <div className="mb-6 flex flex-col gap-4 bg-white p-5 rounded-xl shadow-sm border border-gray-100">
                     <div className="flex flex-col md:flex-row justify-between items-start md:items-center w-full gap-4">
                         <h1 className="text-3xl font-extrabold flex items-center gap-3 text-black">
@@ -535,35 +581,55 @@
                         </div>
                     </div>
                     
-                    {/* Filters aligned for both Summary and Table */}
                     <div className="flex flex-col sm:flex-row gap-3 w-full items-center pt-3 border-t border-gray-100">
                         <div className="flex items-center gap-2 text-sm font-semibold text-gray-600 bg-gray-50 px-3 py-2 rounded-lg border border-gray-200">
                             <FilterIcon className="w-4 h-4" /> Filters:
                         </div>
                         <select 
                             className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white shadow-sm min-w-[140px]"
-                            value={selectedBrand} 
-                            onChange={(e) => { setSelectedBrand(e.target.value); setSelectedCenter('All'); setSelectedTherapist('All'); }}
+                            value={summaryBrand} 
+                            onChange={(e) => { 
+                                const newBrand = e.target.value;
+                                setSummaryBrand(newBrand); 
+                                
+                                // Auto-default to Total for restricted brands, otherwise All
+                                if (['dermes', 'elyze', 'reenex'].includes(newBrand.toLowerCase())) {
+                                    setSummaryCenter('Total');
+                                    setSummaryTherapist('Total');
+                                } else {
+                                    setSummaryCenter('All'); 
+                                    setSummaryTherapist('All'); 
+                                }
+                            }}
                         >
-                            {brands.map(b => (
+                            {summaryBrandsList.map(b => (
                                 <option key={b} value={b}>{b === 'All' ? 'All Brands' : b}</option>
                             ))}
                         </select>
                         <select 
-                            className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white shadow-sm min-w-[140px]"
-                            value={selectedCenter} 
-                            onChange={(e) => { setSelectedCenter(e.target.value); setSelectedTherapist('All'); }}
+                            className={`border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-sm min-w-[140px] ${summaryBrand === 'All' ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : 'bg-white'}`}
+                            value={summaryCenter} 
+                            onChange={(e) => { 
+                                setSummaryCenter(e.target.value); 
+                                // Reset therapist based on active brand rule
+                                if (['dermes', 'elyze', 'reenex'].includes(summaryBrand.toLowerCase())) {
+                                    setSummaryTherapist('Total');
+                                } else {
+                                    setSummaryTherapist('All');
+                                }
+                            }}
+                            disabled={summaryBrand === 'All'}
                         >
-                            {centers.map(c => (
+                            {summaryCentersList.map(c => (
                                 <option key={c} value={c}>{c === 'All' ? 'All Floor Levels' : c}</option>
                             ))}
                         </select>
                         <select 
                             className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white shadow-sm min-w-[140px]"
-                            value={selectedTherapist} 
-                            onChange={(e) => setSelectedTherapist(e.target.value)}
+                            value={summaryTherapist} 
+                            onChange={(e) => setSummaryTherapist(e.target.value)}
                         >
-                            {therapists.map(t => (
+                            {summaryTherapistsList.map(t => (
                                 <option key={t} value={t}>{t === 'All' ? 'All Therapists' : t}</option>
                             ))}
                         </select>
@@ -572,7 +638,7 @@
                             <input
                                 type="text" placeholder="Search data..."
                                 className="pl-9 pr-4 py-2 bg-white shadow-sm border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 w-full"
-                                value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)}
+                                value={summarySearchTerm} onChange={(e) => setSummarySearchTerm(e.target.value)}
                             />
                         </div>
                     </div>
@@ -765,10 +831,10 @@
                                         </div>
                                         <select 
                                             className="w-full text-[9px] font-normal border border-gray-300 rounded text-gray-700 bg-white py-0.5 px-0.5 focus:outline-none focus:ring-1 focus:ring-blue-500 mt-0.5"
-                                            value={selectedBrand}
-                                            onChange={(e) => { setSelectedBrand(e.target.value); setSelectedCenter('All'); setSelectedTherapist('All'); }}
+                                            value={tableBrand}
+                                            onChange={(e) => { setTableBrand(e.target.value); setTableCenter('All'); setTableTherapist('All'); }}
                                         >
-                                            {brands.map(b => <option key={b} value={b}>{b === 'All' ? 'All' : b}</option>)}
+                                            {tableBrandsList.map(b => <option key={b} value={b}>{b === 'All' ? 'All' : b}</option>)}
                                         </select>
                                     </th>
                                     <th className="px-1 py-1.5 font-bold hover:bg-gray-200 transition-colors border-b border-r border-gray-200 bg-gray-50 align-top min-w-[90px] max-w-[90px] w-[90px] sticky left-[60px] z-40">
@@ -778,10 +844,10 @@
                                         </div>
                                         <select 
                                             className="w-full text-[9px] font-normal border border-gray-300 rounded text-gray-700 bg-white py-0.5 px-0.5 focus:outline-none focus:ring-1 focus:ring-blue-500 mt-0.5"
-                                            value={selectedCenter}
-                                            onChange={(e) => { setSelectedCenter(e.target.value); setSelectedTherapist('All'); }}
+                                            value={tableCenter}
+                                            onChange={(e) => { setTableCenter(e.target.value); setTableTherapist('All'); }}
                                         >
-                                            {centers.map(c => <option key={c} value={c}>{c === 'All' ? 'All Floors' : c}</option>)}
+                                            {tableCentersList.map(c => <option key={c} value={c}>{c === 'All' ? 'All Floors' : c}</option>)}
                                         </select>
                                     </th>
                                     <th className="px-1 py-1.5 font-bold hover:bg-gray-200 transition-colors border-b border-r border-gray-200 bg-gray-50 align-top min-w-[85px] max-w-[85px] w-[85px] sticky left-[150px] z-40 shadow-[4px_0_8px_-2px_rgba(0,0,0,0.1)]">
@@ -791,10 +857,10 @@
                                         </div>
                                         <select 
                                             className="w-full text-[9px] font-normal border border-gray-300 rounded text-gray-700 bg-white py-0.5 px-0.5 focus:outline-none focus:ring-1 focus:ring-blue-500 mt-0.5"
-                                            value={selectedTherapist}
-                                            onChange={(e) => setSelectedTherapist(e.target.value)}
+                                            value={tableTherapist}
+                                            onChange={(e) => setTableTherapist(e.target.value)}
                                         >
-                                            {therapists.map(t => <option key={t} value={t}>{t === 'All' ? 'All' : t}</option>)}
+                                            {tableTherapistsList.map(t => <option key={t} value={t}>{t === 'All' ? 'All' : t}</option>)}
                                         </select>
                                     </th>
                                     
@@ -813,8 +879,8 @@
                             </thead>
                             
                             <tbody className="divide-y divide-gray-100 relative z-0">
-                                {processedData.length > 0 ? (
-                                    processedData.map((row) => (
+                                {tableProcessedData.length > 0 ? (
+                                    tableProcessedData.map((row) => (
                                         <tr key={row.id} className="hover:bg-gray-50 transition-colors group">
                                             {/* Frozen Cells in Body */}
                                             <td className="px-1.5 py-1.5 font-semibold text-[11px] text-gray-800 border-r border-gray-200 bg-white group-hover:bg-gray-50 sticky left-0 z-20 min-w-[60px] max-w-[60px] w-[60px] truncate" title={row.Brand}>{row.Brand}</td>
@@ -846,7 +912,7 @@
                         </table>
                     </div>
                     <div className="p-3 border-t border-gray-200 bg-gray-50 text-[11px] text-gray-500 text-right font-medium">
-                        Showing {processedData.length} active rows.
+                        Showing {tableProcessedData.length} active rows.
                     </div>
                 </div>
                 </div>
