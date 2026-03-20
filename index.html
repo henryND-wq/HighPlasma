@@ -90,7 +90,7 @@
                 else if (num >= 15) className += 'bg-yellow-200';
                 else className += 'bg-red-200';
             }
-            else if (colName === '今天新增 ICB Booking') {
+            else if (colName === '今天新增 ICB Booking' || colName === '昨天新增 ICB Booking') {
                 if (num >= 3) className += 'bg-green-200';
                 else if (num >= 1) className += 'bg-yellow-200';
                 else className += 'bg-red-200';
@@ -202,8 +202,9 @@
                         node3Days: getDynamicIndex(extractedHeaders, ['3天增加', 'Node 3 Days Changes'], 26), 
                         
                         futureICB: getDynamicIndex(extractedHeaders, ['未來 ICB Booking', '未來 ICB'], 13), 
-                        avgFutureICB: getDynamicIndex(extractedHeaders, ['未來 人均', 'CB Booking', 'ICB Booking'], 14), 
-                        todayNewICB: getDynamicIndex(extractedHeaders, ['今天新增', 'CB Booking', 'ICB Booking'], 15), 
+                        avgFutureICB: getDynamicIndex(extractedHeaders, ['未來 人均'], 14), 
+                        todayNewICB: getDynamicIndex(extractedHeaders, ['今天新增'], 15), 
+                        yesterdayNewICB: getDynamicIndex(extractedHeaders, ['昨天新增'], 16), 
                         monthlyActive: getDynamicIndex(extractedHeaders, ['當月 激活人數', '激活人數'], 17), 
                         
                         ptQty: getDynamicIndex(extractedHeaders, ['PT Qty'], 27), 
@@ -244,11 +245,11 @@
 
                 } catch (err) {
                     setError(err.message);
-                    setColMap({ brand: 0, center: 2, therapist: 3, node: 22, avgNode: 24, node3Days: 26, futureICB: 13, avgFutureICB: 14, todayNewICB: 15, monthlyActive: 17, ptQty: 27, todayPtQty: 28, fullCourseQty: 30, todayFullCourseQty: 33, paidTrialLongTail: 35, highPexoTodaySales: 34, fullCourseMoney: 32, todayMtdPercent: 45, todaySales: 49 });
+                    setColMap({ brand: 0, center: 2, therapist: 3, node: 22, avgNode: 24, node3Days: 26, futureICB: 13, avgFutureICB: 14, todayNewICB: 15, yesterdayNewICB: 16, monthlyActive: 17, ptQty: 27, todayPtQty: 28, fullCourseQty: 30, todayFullCourseQty: 33, paidTrialLongTail: 35, highPexoTodaySales: 34, fullCourseMoney: 32, todayMtdPercent: 45, todaySales: 49 });
                     setMtdTargetRatio(1.2); 
 
                     let mockGt = new Array(70).fill('0');
-                    mockGt[13] = '342'; mockGt[14] = '1.2'; mockGt[15] = '45'; mockGt[17] = '280';
+                    mockGt[13] = '342'; mockGt[14] = '1.2'; mockGt[15] = '45'; mockGt[16] = '12'; mockGt[17] = '280';
                     mockGt[22] = '862'; mockGt[24] = '200'; mockGt[26] = '12';
                     mockGt[27] = '120'; mockGt[28] = '15'; mockGt[30] = '60'; mockGt[33] = '8'; mockGt[35] = '35'; mockGt[34] = '45000'; mockGt[32] = '125000'; 
                     mockGt[45] = '42.5'; mockGt[49] = '35000';
@@ -279,6 +280,7 @@
                     { id: 'futureICB', index: colMap.futureICB, name: '未來 ICB Booking', format: 'number', headerClass: 'bg-orange-100 text-orange-900 border-t border-orange-200' },
                     { id: 'avgFutureICB', index: colMap.avgFutureICB, name: '未來 人均 ICB Booking', format: 'number', headerClass: 'bg-orange-100 text-orange-900 border-t border-orange-200' },
                     { id: 'todayNewICB', index: colMap.todayNewICB, name: '今天新增 ICB Booking', format: 'number', headerClass: 'bg-orange-100 text-orange-900 border-t border-orange-200' },
+                    { id: 'yesterdayNewICB', index: colMap.yesterdayNewICB, name: '昨天新增 ICB Booking', format: 'number', headerClass: 'bg-orange-100 text-orange-900 border-t border-orange-200' },
                     { id: 'monthlyActive', index: colMap.monthlyActive, name: '當月 激活人數', format: 'number', headerClass: 'bg-orange-100 text-orange-900 border-t border-orange-200' },
                     
                     { id: 'ptQty', index: colMap.ptQty, name: 'PT Qty', format: 'number', headerClass: 'bg-green-100 text-green-900 border-t border-green-200' },
@@ -481,7 +483,7 @@
                 
                 let sums = {
                     totalNodes: 0, nodeDelta: 0, avgNode: 0,
-                    futureICB: 0, avgFutureICB: 0, todayNewICB: 0, monthlyActive: 0,
+                    futureICB: 0, avgFutureICB: 0, todayNewICB: 0, yesterdayNewICB: 0, monthlyActive: 0,
                     ptQty: 0, todayPtQty: 0, fullCourseQty: 0, todayFullCourseQty: 0, paidTrialLongTail: 0,
                     highPexoTodaySales: 0,
                     fullCourseMoney: 0, todayMtdPercent: 0, todaySales: 0
@@ -497,6 +499,7 @@
                     sums.futureICB = parseNumber(grandTotalRow[colMap.futureICB]);
                     sums.avgFutureICB = parseNumber(grandTotalRow[colMap.avgFutureICB]);
                     sums.todayNewICB = parseNumber(grandTotalRow[colMap.todayNewICB]);
+                    sums.yesterdayNewICB = parseNumber(grandTotalRow[colMap.yesterdayNewICB]);
                     sums.monthlyActive = parseNumber(grandTotalRow[colMap.monthlyActive]);
                     
                     sums.ptQty = parseNumber(grandTotalRow[colMap.ptQty]);        
@@ -518,6 +521,7 @@
                         sums.futureICB += item.futureICB;
                         sums.avgFutureICB += item.avgFutureICB; 
                         sums.todayNewICB += item.todayNewICB;
+                        sums.yesterdayNewICB += item.yesterdayNewICB;
                         sums.monthlyActive += item.monthlyActive;
                         
                         sums.ptQty += item.ptQty;
@@ -727,9 +731,15 @@
                             862+ICB
                         </h3>
                         
-                        <div className="flex flex-col items-center bg-white/70 rounded-lg py-2 mb-2 shadow-sm">
-                            <span className="text-4xl font-extrabold text-gray-800">{summaryData.futureICB.toLocaleString()}</span>
-                            <span className="text-xs text-gray-700 mt-1 uppercase tracking-wider font-bold">未來 ICB Booking</span>
+                        <div className="flex justify-between items-center bg-white/70 rounded-lg p-2 mb-2 shadow-sm">
+                            <div className="flex flex-col items-center flex-1">
+                                <span className="text-4xl font-extrabold text-gray-800">{summaryData.futureICB.toLocaleString()}</span>
+                                <span className="text-[10px] text-gray-700 mt-0.5 uppercase tracking-wider font-bold">未來 ICB Booking</span>
+                            </div>
+                            <div className="flex flex-col items-center justify-center pl-2 border-l border-white/50 min-w-[70px]">
+                                <span className="text-2xl font-extrabold text-gray-800">{summaryData.monthlyActive.toLocaleString()}</span>
+                                <span className="text-[9px] text-gray-700 font-bold uppercase leading-tight mt-1">當月<br/>激活人數</span>
+                            </div>
                         </div>
                         
                         <div className="grid grid-cols-3 gap-1 mt-auto">
@@ -742,8 +752,8 @@
                                 <span className="text-[10px] text-gray-700 font-bold uppercase leading-tight mt-1">今天新增<br/>ICB Booking</span>
                             </div>
                             <div className="bg-white/70 border border-white/50 rounded-lg p-2 flex flex-col justify-center items-center text-center shadow-inner">
-                                <span className="text-xl font-extrabold text-gray-800">{summaryData.monthlyActive.toLocaleString()}</span>
-                                <span className="text-[10px] text-gray-700 font-bold uppercase leading-tight mt-1">當月<br/>激活人數</span>
+                                <span className="text-xl font-extrabold text-gray-800">{summaryData.yesterdayNewICB.toLocaleString()}</span>
+                                <span className="text-[10px] text-gray-700 font-bold uppercase leading-tight mt-1">昨天新增<br/>ICB Booking</span>
                             </div>
                         </div>
                     </div>
@@ -844,7 +854,7 @@
                                         200 Nodes
                                     </th>
 
-                                    <th colSpan="4" className="bg-orange-500 text-white text-center font-bold py-1.5 border-r border-orange-600 text-[11px] tracking-wide">
+                                    <th colSpan="5" className="bg-orange-500 text-white text-center font-bold py-1.5 border-r border-orange-600 text-[11px] tracking-wide">
                                         862+ICB
                                     </th>
                                     
