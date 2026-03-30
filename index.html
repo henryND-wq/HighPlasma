@@ -211,14 +211,14 @@
                         therapist: getDynamicIndex(extractedHeaders, ['therapist'], 3),
                         
                         node: getDynamicIndex(extractedHeaders, ['node'], 37), // AL
-                        avgNode: getDynamicIndex(extractedHeaders, ['平均每人分發點數量'], 41), // AP
+                        avgNode: getDynamicIndex(extractedHeaders, ['平均每人 分發點數量', '平均每人分發點數量', '平均每人'], 39), // AN
                         node3Days: getDynamicIndex(extractedHeaders, ['3天增加 nodes', '3天增加'], 41), // AP
                         
                         futureICB: getDynamicIndex(extractedHeaders, ['未來 icb booking', '未來 icb'], 13), 
                         avgFutureICB: getDynamicIndex(extractedHeaders, ['未來 人均 icb booking', '未來 人均 cb booking', '未來 人均'], 14), 
-                        todayNewICB: getDynamicIndex(extractedHeaders, ['今天新增icb booking', '今天新增 cb booking', '今天新增'], 15), // P
+                        todayNewICB: getDynamicIndex(extractedHeaders, ['今天新增icb booking', '今天新增 icb booking', '今天新增 cb booking'], 15), // P
                         yesterdayNewICB: getDynamicIndex(extractedHeaders, ['昨天新增 icb booking', '昨天新增 cb booking', '昨天新增'], 16), 
-                        monthlyActive: getDynamicIndex(extractedHeaders, ['當月 激活人數', '當月激活人數', '激活人數'], 17), 
+                        monthlyActive: getDynamicIndex(extractedHeaders, ['當月激活人數', '當月 激活人數'], 32), // AG
                         
                         ptQty: getDynamicIndex(extractedHeaders, ['pt qty.', 'pt qty'], 42), // AQ
                         todayPtQty: getDynamicIndex(extractedHeaders, ['今天pt qty', '今天 pt qty'], 43), // AR
@@ -258,12 +258,12 @@
 
                 } catch (err) {
                     setError(err.message);
-                    setColMap({ brand: 0, center: 2, therapist: 3, node: 37, avgNode: 41, node3Days: 41, futureICB: 13, avgFutureICB: 14, todayNewICB: 15, yesterdayNewICB: 16, monthlyActive: 17, ptQty: 42, todayPtQty: 43, fullCourseQty: 45, todayFullCourseQty: 48, paidTrialLongTail: 50, highPexoTodaySales: 49, fullCourseMoney: 46, todayMtdPercent: 60, todaySales: 64 });
+                    setColMap({ brand: 0, center: 2, therapist: 3, node: 37, avgNode: 39, node3Days: 41, futureICB: 13, avgFutureICB: 14, todayNewICB: 15, yesterdayNewICB: 16, monthlyActive: 32, ptQty: 42, todayPtQty: 43, fullCourseQty: 45, todayFullCourseQty: 48, paidTrialLongTail: 50, highPexoTodaySales: 49, fullCourseMoney: 46, todayMtdPercent: 60, todaySales: 64 });
                     setMtdTargetRatio(1.2); 
 
                     let mockGt = new Array(70).fill('0');
-                    mockGt[13] = '342'; mockGt[14] = '1.2'; mockGt[15] = '45'; mockGt[16] = '12'; mockGt[17] = '280';
-                    mockGt[37] = '862'; mockGt[41] = '200'; 
+                    mockGt[13] = '342'; mockGt[14] = '1.2'; mockGt[15] = '45'; mockGt[16] = '12'; mockGt[32] = '280';
+                    mockGt[37] = '862'; mockGt[39] = '200'; mockGt[41] = '12';
                     mockGt[42] = '120'; mockGt[43] = '15'; mockGt[45] = '60'; mockGt[48] = '8'; mockGt[50] = '35'; mockGt[49] = '45000'; mockGt[46] = '125000'; 
                     mockGt[60] = '42.5'; mockGt[64] = '35000';
                     setGrandTotalRowRaw(mockGt);
