@@ -34,20 +34,39 @@
         const TrendingUp = ({ className }) => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>;
         const Zap = ({ className }) => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>;
 
-        // Helper to parse CSV manually
+        // ============================================================================
+        // ROBUST CSV PARSER: Correctly handles newlines (\n) inside quoted cells!
+        // This prevents columns from shifting when "平均每人\n分發點數量" is encountered.
+        // ============================================================================
         function parseCSV(text) {
             const result = [];
-            const lines = text.split(/\r?\n/);
-            for (let line of lines) {
-                const row = [];
-                let inQuotes = false;
-                let val = "";
-                for (let i = 0; i < line.length; i++) {
-                    const char = line[i];
-                    if (char === '"') inQuotes = !inQuotes;
-                    else if (char === ',' && !inQuotes) { row.push(val.trim()); val = ""; }
-                    else val += char;
+            let row = [];
+            let val = "";
+            let inQuotes = false;
+            
+            for (let i = 0; i < text.length; i++) {
+                const char = text[i];
+                if (char === '"') {
+                    if (inQuotes && text[i+1] === '"') {
+                        val += '"';
+                        i++; 
+                    } else {
+                        inQuotes = !inQuotes;
+                    }
+                } else if (char === ',' && !inQuotes) {
+                    row.push(val.trim());
+                    val = "";
+                } else if ((char === '\n' || char === '\r') && !inQuotes) {
+                    if (char === '\r' && text[i+1] === '\n') i++; // Handle Windows \r\n
+                    row.push(val.trim());
+                    result.push(row);
+                    row = [];
+                    val = "";
+                } else {
+                    val += char;
                 }
+            }
+            if (val || row.length > 0) {
                 row.push(val.trim());
                 result.push(row);
             }
@@ -75,7 +94,7 @@
             let className = 'text-gray-900 font-medium ';
             let style = {};
 
-            if (colName === 'Node' || colName === '平均每人') {
+            if (colName === 'Node' || colName === '平均每人' || colName === '平均每人分發點數量') {
                 if (num > 200) className += 'bg-green-200';
                 else if (num >= 150) className += 'bg-yellow-200';
                 else if (num >= 80) className += 'bg-orange-200';
@@ -120,24 +139,6 @@
             return { className, style };
         };
 
-        // Advanced matching prioritizing Exact matches first, then Partial
-        function getDynamicIndex(headers, searchTerms, fallbackIndex) {
-            const cleanHeaders = headers.map(h => (h || '').replace(/[\r\n]+/g, ' ').replace(/"/g, '').replace(/\s+/g, ' ').trim().toLowerCase());
-            const cleanTerms = searchTerms.map(t => t.toLowerCase().trim());
-            
-            // Pass 1: Exact Match
-            for (let i = 0; i < cleanHeaders.length; i++) {
-                if (cleanTerms.includes(cleanHeaders[i])) return i;
-            }
-            // Pass 2: Partial Match
-            for (let i = 0; i < cleanHeaders.length; i++) {
-                for (let term of cleanTerms) {
-                    if (cleanHeaders[i].includes(term)) return i;
-                }
-            }
-            return fallbackIndex;
-        }
-
         const GOOGLE_SHEET_ID = '1mtORjZ4a5EyrlPJsiejhXuMZiyw5MStoXdxn5l1Jhno';
 
         function App() {
@@ -177,101 +178,190 @@
                     const realTimeCsv = await realTimeRes.text();
                     const realTimeParsed = parseCSV(realTimeCsv);
 
-                    // Find actual Grand Total row (checks first 3 cols)
-                    const gtRow = realTimeParsed.find(row => 
-                        (row[0] && row[0].toString().toLowerCase().includes('grand total')) ||
-                        (row[1] && row[1].toString().toLowerCase().includes('grand total')) ||
-                        (row[2] && row[2].toString().toLowerCase().includes('grand total'))
-                    );
-                    if (gtRow) setGrandTotalRowRaw(gtRow);
-
-                    let targetRatio = null;
-                    if (realTimeParsed.length > 2) {
-                        const bj3 = parseNumber(realTimeParsed[2][61]);
-                        const bm2 = parseNumber(realTimeParsed[1][64]);
-                        if (bm2 > 0) targetRatio = (bj3 / bm2) * 1.5;
-                    }
-                    setMtdTargetRatio(targetRatio);
-
+                    // =========================================================================
+                    // 1. STRICT HEADER ANCHOR DETECTION
+                    // Scans downwards and locks ONLY onto the row containing "Brand".
+                    // This perfectly ignores super-headers like "200 Nodes" that break the mapping.
+                    // =========================================================================
                     let headerRowIdx = 0;
-                    for (let i = 0; i < Math.min(15, realTimeParsed.length); i++) {
-                        const rowStr = realTimeParsed[i].map(c => c ? c.toString().toLowerCase() : '').join('');
-                        if (rowStr.includes('brand') && (rowStr.includes('center') || rowStr.includes('floor') || rowStr.includes('therapist'))) {
+                    for (let i = 0; i < Math.min(20, realTimeParsed.length); i++) {
+                        const cells = realTimeParsed[i].map(c => (c || '').toString().toLowerCase().replace(/[\s\r\n]+/g, ''));
+                        if (cells.includes('brand') || cells.includes('品牌')) {
                             headerRowIdx = i;
                             break;
                         }
                     }
 
-                    const extractedHeaders = realTimeParsed[headerRowIdx];
-                    
-                    // Robust Exact Mapping Arrays - UPDATED per exact header names
+                    // =========================================================================
+                    // 2. PERFECT GRAND TOTAL ROW DETECTION
+                    // Scans the ENTIRE row (not just slice(0,5)) to ensure it perfectly locks 
+                    // onto the Grand Total row, avoiding the Dermes Row fallback bug!
+                    // =========================================================================
+                    let gtRowIdx = -1;
+                    for (let i = 0; i < Math.min(50, realTimeParsed.length); i++) {
+                        if (!realTimeParsed[i]) continue;
+                        
+                        const isGT = realTimeParsed[i].some(c => {
+                            const clean = (c || '').toString().toLowerCase().replace(/[^a-z0-9]/gi, '');
+                            return clean.includes('grandtotal');
+                        });
+                        
+                        if (isGT) {
+                            gtRowIdx = i;
+                            setGrandTotalRowRaw(realTimeParsed[i]);
+                            break;
+                        }
+                    }
+
+                    // Calculate Target Ratio
+                    let targetRatio = null;
+                    if (realTimeParsed.length > 2) {
+                        try {
+                            const bj3 = parseNumber(realTimeParsed[2][61]);
+                            const bm2 = parseNumber(realTimeParsed[1][64]);
+                            if (bm2 > 0) targetRatio = (bj3 / bm2) * 1.5;
+                        } catch (e) {
+                            console.warn("Could not calculate target ratio");
+                        }
+                    }
+                    setMtdTargetRatio(targetRatio);
+
+                    // =========================================================================
+                    // 3. DYNAMIC MAPPING ENGINE
+                    // ONLY scans the precise header row. If text is altered, safely falls back
+                    // to the exact columns defined by the user.
+                    // =========================================================================
+                    let maxSearchRows = Math.min(15, realTimeParsed.length);
+                    let maxCols = 0;
+                    for (let i = 0; i < maxSearchRows; i++) {
+                        if (realTimeParsed[i] && realTimeParsed[i].length > maxCols) {
+                            maxCols = realTimeParsed[i].length;
+                        }
+                    }
+                    const headerEndIdx = gtRowIdx > 0 ? gtRowIdx - 1 : Math.min(5, realTimeParsed.length - 1);
+
+                    const getDynamicIndex = (searchTerms, fallbackIndex) => {
+                        const cleanTerms = searchTerms.map(t => t.toLowerCase().replace(/[\s\r\n]+/g, ''));
+                        
+                        for (let c = 0; c < maxCols; c++) {
+                            for (let r = 0; r <= headerEndIdx; r++) {
+                                if (!realTimeParsed[r]) continue;
+                                const cell = (realTimeParsed[r][c] || '').toString().toLowerCase().replace(/[\s\r\n]+/g, '');
+                                if (cleanTerms.includes(cell)) return c;
+                            }
+                        }
+                        
+                        for (let c = 0; c < maxCols; c++) {
+                            for (let r = 0; r <= headerEndIdx; r++) {
+                                if (!realTimeParsed[r]) continue;
+                                const cell = (realTimeParsed[r][c] || '').toString().toLowerCase().replace(/[\s\r\n]+/g, '');
+                                for (let term of cleanTerms) {
+                                    if (term.length >= 2 && cell.startsWith(term)) return c;
+                                }
+                            }
+                        }
+
+                        for (let c = 0; c < maxCols; c++) {
+                            for (let r = 0; r <= headerEndIdx; r++) {
+                                if (!realTimeParsed[r]) continue;
+                                const cell = (realTimeParsed[r][c] || '').toString().toLowerCase().replace(/[\s\r\n]+/g, '');
+                                for (let term of cleanTerms) {
+                                    if (term.length >= 3 && cell.includes(term)) return c;
+                                }
+                            }
+                        }
+                        
+                        return fallbackIndex; 
+                    };
+
+                    // Using the strictly accurate Fallbacks corresponding to your sheet structure
                     const mappedIndices = {
-                        brand: getDynamicIndex(extractedHeaders, ['brand'], 0),
-                        center: getDynamicIndex(extractedHeaders, ['center', 'floor level (center)', 'floor'], 2),
-                        therapist: getDynamicIndex(extractedHeaders, ['therapist'], 3),
+                        brand: getDynamicIndex(['brand', '品牌'], 0), 
+                        center: getDynamicIndex(['center', 'floorlevel(center)', 'floor', '分店'], 2), 
+                        therapist: getDynamicIndex(['therapist', '治療師'], 3), 
                         
-                        node: getDynamicIndex(extractedHeaders, ['node'], 37), // AL
-                        avgNode: getDynamicIndex(extractedHeaders, ['平均每人 分發點數量', '平均每人分發點數量', '平均每人'], 39), // AN
-                        node3Days: getDynamicIndex(extractedHeaders, ['3天增加 nodes', '3天增加'], 41), // AP
+                        node: getDynamicIndex(['node', 'nodes'], 39), 
+                        avgNode: getDynamicIndex(['平均每人分發點數量', '平均每人'], 41), 
+                        node3Days: getDynamicIndex(['3天增加nodes', '3天增加nod'], 43), 
                         
-                        futureICB: getDynamicIndex(extractedHeaders, ['未來 icb booking', '未來 icb'], 13), 
-                        avgFutureICB: getDynamicIndex(extractedHeaders, ['未來 人均 icb booking', '未來 人均 cb booking', '未來 人均'], 14), 
-                        todayNewICB: getDynamicIndex(extractedHeaders, ['今天新增icb booking', '今天新增 icb booking', '今天新增 cb booking'], 15), // P
-                        yesterdayNewICB: getDynamicIndex(extractedHeaders, ['昨天新增 icb booking', '昨天新增 cb booking', '昨天新增'], 16), 
-                        monthlyActive: getDynamicIndex(extractedHeaders, ['當月激活人數', '當月 激活人數'], 32), // AG
+                        futureICB: getDynamicIndex(['未來icbbooking', '未來icb'], 14), // Updated to correct O column
+                        avgFutureICB: getDynamicIndex(['未來人均icbbooking', '未來人均cbbooking', '未來人均'], 15), // P
+                        todayNewICB: getDynamicIndex(['今天新增icbbooking', '今天新增cbbooking', '今天新增'], 16), // Q
+                        yesterdayNewICB: getDynamicIndex(['昨天新增icbbooking', '昨天新增cbbooking', '昨天新增'], 17), // R
+                        monthlyActive: getDynamicIndex(['當月激活人數', '激活人數'], 32), 
                         
-                        ptQty: getDynamicIndex(extractedHeaders, ['pt qty.', 'pt qty'], 42), // AQ
-                        todayPtQty: getDynamicIndex(extractedHeaders, ['今天pt qty', '今天 pt qty'], 43), // AR
+                        ptQty: getDynamicIndex(['ptqty.', 'ptqty'], 44), 
+                        todayPtQty: getDynamicIndex(['今天ptqty', '今天pt'], 45), 
                         
-                        fullCourseQty: getDynamicIndex(extractedHeaders, ['full course qty.', 'full course qty'], 45), // AT
-                        todayFullCourseQty: getDynamicIndex(extractedHeaders, ['今天full course qty', '今天 full course'], 48), // AW
-                        paidTrialLongTail: getDynamicIndex(extractedHeaders, ['paid trial龍尾 book', 'paid trial 龍尾 book', '龍尾 book'], 50), // AY
-                        highPexoTodaySales: getDynamicIndex(extractedHeaders, ['today $', 'today$'], 49), // AX
-                        fullCourseMoney: getDynamicIndex(extractedHeaders, ['$', 'full course $'], 46), // AU
+                        fullCourseQty: getDynamicIndex(['fullcourseqty.', 'fullcourseqty'], 47), 
+                        todayFullCourseQty: getDynamicIndex(['今天fullcourseqty', '今天fullcourse'], 50), 
+                        paidTrialLongTail: getDynamicIndex(['paidtrial龍尾book', '龍尾book'], 51), 
+                        highPexoTodaySales: getDynamicIndex(['today$', '今日銷售'], 49), 
+                        fullCourseMoney: getDynamicIndex(['fullcourse$', '$'], 48), 
                         
-                        todayMtdPercent: getDynamicIndex(extractedHeaders, ['today mtd%'], 60), // BI
-                        todaySales: getDynamicIndex(extractedHeaders, ['今天銷售額'], 64) // BM
+                        todayMtdPercent: getDynamicIndex(['todaymtd%', 'todaymtd', 'daymtd'], 62), 
+                        todaySales: getDynamicIndex(['今天銷售額', '今天銷售'], 66) 
                     };
                     setColMap(mappedIndices);
 
-                    const rawData = realTimeParsed.slice(headerRowIdx + 1).filter(row => row.length > 5); 
+                    const finalHeaders = [];
+                    for (let c = 0; c < maxCols; c++) {
+                        let text = "";
+                        for (let r = headerEndIdx; r >= 0; r--) {
+                            if (realTimeParsed[r] && realTimeParsed[r][c] && realTimeParsed[r][c].toString().trim() !== '') {
+                                text = realTimeParsed[r][c].toString().trim();
+                                break;
+                            }
+                        }
+                        finalHeaders.push(text || `Col ${c + 1}`);
+                    }
+                    setHeaders(finalHeaders);
+
+                    // =========================================================================
+                    // 4. EXTRACT DATA & FILTER OUT GRAND TOTAL
+                    // =========================================================================
+                    const dataStartIdx = gtRowIdx !== -1 ? gtRowIdx + 1 : headerRowIdx + 1;
+                    
+                    const rawData = realTimeParsed.slice(dataStartIdx).filter(row => {
+                        const isGrandTotal = row.slice(0, 5).some(c => 
+                            (c || '').toString().toLowerCase().replace(/[\s\r\n]+/g, '').includes('grandtotal')
+                        );
+                        return row.length > 5 && !isGrandTotal;
+                    });
                     
                     let currentBrand = 'Unknown';
                     let currentCenter = 'Unknown';
                     
                     const filledData = rawData.map(row => {
-                        if (row[mappedIndices.brand] && row[mappedIndices.brand].trim() !== '') currentBrand = row[mappedIndices.brand];
-                        else row[mappedIndices.brand] = currentBrand;
+                        if (mappedIndices.brand >= 0 && row[mappedIndices.brand] && row[mappedIndices.brand].toString().trim() !== '') currentBrand = row[mappedIndices.brand];
+                        else if (mappedIndices.brand >= 0) row[mappedIndices.brand] = currentBrand;
                         
-                        if (row[mappedIndices.center] && row[mappedIndices.center].trim() !== '') currentCenter = row[mappedIndices.center];
-                        else row[mappedIndices.center] = currentCenter;
+                        if (mappedIndices.center >= 0 && row[mappedIndices.center] && row[mappedIndices.center].toString().trim() !== '') currentCenter = row[mappedIndices.center];
+                        else if (mappedIndices.center >= 0) row[mappedIndices.center] = currentCenter;
                         
                         return row;
                     });
 
-                    const finalHeaders = extractedHeaders.map((h, i) => h || `Col ${i + 1}`);
-
-                    setHeaders(finalHeaders);
                     setData(filledData);
                     setLastSyncTime(new Date());
                     setError(null);
 
                 } catch (err) {
                     setError(err.message);
-                    setColMap({ brand: 0, center: 2, therapist: 3, node: 37, avgNode: 39, node3Days: 41, futureICB: 13, avgFutureICB: 14, todayNewICB: 15, yesterdayNewICB: 16, monthlyActive: 32, ptQty: 42, todayPtQty: 43, fullCourseQty: 45, todayFullCourseQty: 48, paidTrialLongTail: 50, highPexoTodaySales: 49, fullCourseMoney: 46, todayMtdPercent: 60, todaySales: 64 });
+                    setColMap({ brand: 0, center: 2, therapist: 3, node: 39, avgNode: 41, node3Days: 43, futureICB: 14, avgFutureICB: 15, todayNewICB: 16, yesterdayNewICB: 17, monthlyActive: 32, ptQty: 44, todayPtQty: 45, fullCourseQty: 47, todayFullCourseQty: 50, paidTrialLongTail: 51, highPexoTodaySales: 49, fullCourseMoney: 48, todayMtdPercent: 62, todaySales: 66 });
                     setMtdTargetRatio(1.2); 
 
                     let mockGt = new Array(70).fill('0');
-                    mockGt[13] = '342'; mockGt[14] = '1.2'; mockGt[15] = '45'; mockGt[16] = '12'; mockGt[32] = '280';
-                    mockGt[37] = '862'; mockGt[39] = '200'; mockGt[41] = '12';
-                    mockGt[42] = '120'; mockGt[43] = '15'; mockGt[45] = '60'; mockGt[48] = '8'; mockGt[50] = '35'; mockGt[49] = '45000'; mockGt[46] = '125000'; 
-                    mockGt[60] = '42.5'; mockGt[64] = '35000';
+                    mockGt[14] = '342'; mockGt[15] = '1.2'; mockGt[16] = '45'; mockGt[17] = '12'; mockGt[32] = '280';
+                    mockGt[39] = '862'; mockGt[41] = '200'; mockGt[43] = '12';
+                    mockGt[44] = '120'; mockGt[45] = '15'; mockGt[47] = '60'; mockGt[50] = '8'; mockGt[51] = '35'; mockGt[49] = '45000'; mockGt[48] = '125000'; 
+                    mockGt[62] = '99'; mockGt[66] = '25094';
                     setGrandTotalRowRaw(mockGt);
 
-                    setHeaders(['Brand', 'PIC', 'Center', 'Therapist', ...Array(50).fill('Data')]);
+                    setHeaders(['Brand', 'PIC', 'Center', 'Therapist', ...Array(60).fill('Data')]);
                     setData([
-                        ['Brand A', 'John Doe', 'Center North', 'Alice', ...Array(50).fill('100')],
-                        ['Brand B', 'Jane Smith', 'Center South', 'Bob', ...Array(50).fill('200')],
+                        ['Brand A', 'John Doe', 'Center North', 'Alice', ...Array(60).fill('100')],
+                        ['Brand B', 'Jane Smith', 'Center South', 'Bob', ...Array(60).fill('200')],
                     ]);
                     setLastSyncTime(new Date());
                 } finally {
@@ -287,7 +377,8 @@
                 if (!colMap) return [];
                 return [
                     { id: 'node', index: colMap.node, name: 'Node', format: 'number', headerClass: 'bg-blue-100 text-blue-900 border-t border-blue-200' },
-                    { id: 'avgNode', index: colMap.avgNode, name: '平均每人', format: 'number', headerClass: 'bg-blue-100 text-blue-900 border-t border-blue-200' },
+                    // Force names back to the clear UI titles
+                    { id: 'avgNode', index: colMap.avgNode, name: '平均每人分發點數量', forceName: true, format: 'number', headerClass: 'bg-blue-100 text-blue-900 border-t border-blue-200' },
                     { id: 'node3Days', index: colMap.node3Days, name: '3天增加', format: 'number', headerClass: 'bg-blue-100 text-blue-900 border-t border-blue-200' },
                     
                     { id: 'futureICB', index: colMap.futureICB, name: '未來 ICB Booking', format: 'number', headerClass: 'bg-orange-100 text-orange-900 border-t border-orange-200' },
@@ -300,13 +391,19 @@
                     { id: 'todayPtQty', index: colMap.todayPtQty, name: '今天 PT QTY', format: 'number', headerClass: 'bg-green-100 text-green-900 border-t border-green-200' },
                     { id: 'fullCourseQty', index: colMap.fullCourseQty, name: 'Full course Qty.', format: 'number', headerClass: 'bg-green-100 text-green-900 border-t border-green-200' },
                     { id: 'todayFullCourseQty', index: colMap.todayFullCourseQty, name: '今天 Full course', format: 'number', headerClass: 'bg-green-100 text-green-900 border-t border-green-200' }, 
-                    { id: 'paidTrialLongTail', index: colMap.paidTrialLongTail, name: 'Paid Trial 龍尾 Book', format: 'number', headerClass: 'bg-green-100 text-green-900 border-t border-green-200' },
+                    { id: 'paidTrialLongTail', index: colMap.paidTrialLongTail, name: 'Paid Trial 龍尾 Book', forceName: true, format: 'number', headerClass: 'bg-green-100 text-green-900 border-t border-green-200' },
+                    { id: 'highPexoTodaySales', index: colMap.highPexoTodaySales, name: '今日銷售', forceName: true, format: 'currency', headerClass: 'bg-green-100 text-green-900 border-t border-green-200' },
+                    { id: 'fullCourseMoney', index: colMap.fullCourseMoney, name: 'Full Course $', forceName: true, format: 'currency', headerClass: 'bg-green-100 text-green-900 border-t border-green-200' },
                     
                     { id: 'todayMtdPercent', index: colMap.todayMtdPercent, name: 'Today MTD%', format: 'percent', headerClass: 'bg-purple-100 text-purple-900 border-t border-purple-200' },
                     { id: 'todaySales', index: colMap.todaySales, name: '今天銷售額', format: 'currency', headerClass: 'bg-purple-100 text-purple-900 border-t border-purple-200' }
                 ].map(kpi => ({
                     ...kpi,
-                    displayName: (headers[kpi.index] && headers[kpi.index].trim() !== '') ? headers[kpi.index].replace(/[\r\n]+/g, ' ').replace(/"/g, '') : kpi.name
+                    displayName: kpi.forceName 
+                        ? kpi.name 
+                        : (kpi.index >= 0 && headers[kpi.index] && headers[kpi.index].trim() !== '') 
+                            ? headers[kpi.index].replace(/[\r\n]+/g, ' ').replace(/"/g, '') 
+                            : kpi.name
                 }));
             }, [colMap, headers]);
 
@@ -314,12 +411,14 @@
             const mapRowToObject = useCallback((row) => {
                 if (!colMap || !row) return null;
                 let mapped = { 
-                    Brand: row[colMap.brand] || 'Unknown', 
-                    Center: row[colMap.center] || 'Unknown',
-                    Therapist: row[colMap.therapist] || '', 
+                    Brand: colMap.brand >= 0 ? row[colMap.brand] || 'Unknown' : 'Unknown', 
+                    Center: colMap.center >= 0 ? row[colMap.center] || 'Unknown' : 'Unknown',
+                    Therapist: colMap.therapist >= 0 ? row[colMap.therapist] || '' : '', 
                     raw: row 
                 };
-                activeKPIs.forEach(kpi => { mapped[kpi.id] = parseNumber(row[kpi.index]); });
+                activeKPIs.forEach(kpi => { 
+                    mapped[kpi.id] = (kpi.index >= 0) ? parseNumber(row[kpi.index]) : 0; 
+                });
                 return mapped;
             }, [colMap, activeKPIs]);
 
@@ -334,17 +433,17 @@
 
             // --- DROPDOWN LISTS FOR SUMMARY (WITH RULES) ---
             const summaryBrandsList = useMemo(() => {
-                if (!colMap) return [];
-                const validRows = data.filter(r => r[colMap.center] && !r[colMap.center].toLowerCase().includes('grand total'));
+                if (!colMap || colMap.brand < 0) return [];
+                const validRows = data.filter(r => colMap.center >= 0 && r[colMap.center] && !r[colMap.center].toLowerCase().includes('grand total'));
                 const bList = [...new Set(validRows.map(r => r[colMap.brand]).filter(Boolean))]
                     .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
                 return ['All', ...bList];
             }, [data, colMap]);
 
             const summaryCentersList = useMemo(() => {
-                if (!colMap) return [];
+                if (!colMap || colMap.center < 0) return [];
                 const validRows = data.filter(r => r[colMap.center] && !r[colMap.center].toLowerCase().includes('grand total'));
-                const brandFiltered = summaryBrand === 'All' ? validRows : validRows.filter(r => r[colMap.brand] === summaryBrand);
+                const brandFiltered = summaryBrand === 'All' ? validRows : validRows.filter(r => colMap.brand >= 0 && r[colMap.brand] === summaryBrand);
                 const isRestricted = ['dermes', 'elyze', 'reenex'].includes(summaryBrand.toLowerCase());
                 
                 let rawList = [...new Set(brandFiltered.map(r => r[colMap.center]).filter(Boolean))];
@@ -357,7 +456,7 @@
                 if (hasTotal) sortedCList = ['Total', ...sortedCList];
                 
                 if (isRestricted) {
-                    return sortedCList; // Hide 'All', only show available centers/Total
+                    return sortedCList; 
                 } else {
                     let cList = ['All', ...sortedCList];
                     if (summaryBrand === 'All') cList = cList.filter(c => c.toLowerCase() !== 'total');
@@ -366,10 +465,10 @@
             }, [data, summaryBrand, colMap]);
 
             const summaryTherapistsList = useMemo(() => {
-                if (!colMap) return [];
-                const validRows = data.filter(r => r[colMap.center] && !r[colMap.center].toLowerCase().includes('grand total'));
-                let brandFiltered = summaryBrand === 'All' ? validRows : validRows.filter(r => r[colMap.brand] === summaryBrand);
-                let centerFiltered = summaryCenter === 'All' ? brandFiltered : brandFiltered.filter(r => r[colMap.center] === summaryCenter);
+                if (!colMap || colMap.therapist < 0) return [];
+                const validRows = data.filter(r => colMap.center >= 0 && r[colMap.center] && !r[colMap.center].toLowerCase().includes('grand total'));
+                let brandFiltered = summaryBrand === 'All' ? validRows : validRows.filter(r => colMap.brand >= 0 && r[colMap.brand] === summaryBrand);
+                let centerFiltered = summaryCenter === 'All' ? brandFiltered : brandFiltered.filter(r => colMap.center >= 0 && r[colMap.center] === summaryCenter);
                 const isRestricted = ['dermes', 'elyze', 'reenex'].includes(summaryBrand.toLowerCase());
                 
                 let rawList = [...new Set(centerFiltered.map(r => r[colMap.therapist]).filter(Boolean))];
@@ -382,7 +481,7 @@
                 if (hasTotal) sortedTList = ['Total', ...sortedTList];
 
                 if (isRestricted) {
-                    return sortedTList; // Hide 'All Therapists'
+                    return sortedTList; 
                 } else {
                     let tList = ['All', ...sortedTList];
                     if (summaryBrand === 'All') tList = tList.filter(t => t.toLowerCase() !== 'total');
@@ -392,7 +491,6 @@
 
             // --- SUMMARY PANEL LOGIC (FIND EXACT MATCH TO PREVENT DOUBLE COUNTING) ---
             const summaryData = useMemo(() => {
-                // Default zero state
                 let sums = {
                     totalNodes: 0, nodeDelta: 0, avgNode: 0, futureICB: 0, avgFutureICB: 0, 
                     todayNewICB: 0, yesterdayNewICB: 0, monthlyActive: 0, ptQty: 0, todayPtQty: 0, 
@@ -406,12 +504,9 @@
                 
                 let targetRow = null;
 
-                // Scenario 1: No filters -> Use Grand Total row safely provided by sheet
                 if (isUnfiltered && grandTotalData) {
                     targetRow = grandTotalData;
-                } 
-                // Scenario 2: Dropdowns used (No random string search) -> Find EXACT subtotal row in sheet
-                else if (!summarySearchTerm) {
+                } else if (!summarySearchTerm) {
                     const expectedBrand = summaryBrand;
                     const expectedCenter = summaryCenter === 'All' ? 'Total' : summaryCenter;
                     const expectedTherapist = summaryTherapist === 'All' ? 'Total' : summaryTherapist;
@@ -423,28 +518,25 @@
                     );
                 }
 
-                // If we found a perfect matching subtotal/total row from the sheet, map it instantly
                 if (targetRow) {
-                    sums.totalNodes = targetRow.node;
-                    sums.nodeDelta = targetRow.node3Days;
-                    sums.avgNode = targetRow.avgNode;
-                    sums.futureICB = targetRow.futureICB;
-                    sums.avgFutureICB = targetRow.avgFutureICB;
-                    sums.todayNewICB = targetRow.todayNewICB;
-                    sums.yesterdayNewICB = targetRow.yesterdayNewICB;
-                    sums.monthlyActive = targetRow.monthlyActive;
-                    sums.ptQty = targetRow.ptQty;
-                    sums.todayPtQty = targetRow.todayPtQty;
-                    sums.fullCourseQty = targetRow.fullCourseQty;
-                    sums.todayFullCourseQty = targetRow.todayFullCourseQty;
-                    sums.paidTrialLongTail = targetRow.paidTrialLongTail;
-                    sums.highPexoTodaySales = targetRow.highPexoTodaySales;
-                    sums.fullCourseMoney = targetRow.fullCourseMoney;
-                    sums.todayMtdPercent = targetRow.todayMtdPercent;
-                    sums.todaySales = targetRow.todaySales;
-                } 
-                // Scenario 3: User typed in the Search Bar -> We must manually sum/average visible base-level rows
-                else {
+                    sums.totalNodes = targetRow.node || 0;
+                    sums.nodeDelta = targetRow.node3Days || 0;
+                    sums.avgNode = targetRow.avgNode || 0;
+                    sums.futureICB = targetRow.futureICB || 0;
+                    sums.avgFutureICB = targetRow.avgFutureICB || 0;
+                    sums.todayNewICB = targetRow.todayNewICB || 0;
+                    sums.yesterdayNewICB = targetRow.yesterdayNewICB || 0;
+                    sums.monthlyActive = targetRow.monthlyActive || 0;
+                    sums.ptQty = targetRow.ptQty || 0;
+                    sums.todayPtQty = targetRow.todayPtQty || 0;
+                    sums.fullCourseQty = targetRow.fullCourseQty || 0;
+                    sums.todayFullCourseQty = targetRow.todayFullCourseQty || 0;
+                    sums.paidTrialLongTail = targetRow.paidTrialLongTail || 0;
+                    sums.highPexoTodaySales = targetRow.highPexoTodaySales || 0;
+                    sums.fullCourseMoney = targetRow.fullCourseMoney || 0;
+                    sums.todayMtdPercent = targetRow.todayMtdPercent || 0;
+                    sums.todaySales = targetRow.todaySales || 0;
+                } else {
                     let filtered = allProcessedData.filter(item => !item.Center.toLowerCase().includes('grand total'));
                     
                     if (summaryBrand !== 'All') filtered = filtered.filter(item => item.Brand === summaryBrand);
@@ -452,7 +544,6 @@
                     if (summaryTherapist !== 'All') filtered = filtered.filter(item => item.Therapist === summaryTherapist);
                     if (summarySearchTerm) filtered = filtered.filter(item => item.raw.join(' ').toLowerCase().includes(summarySearchTerm.toLowerCase()));
 
-                    // Filter out Google Sheet 'Total' sub-rows so we don't accidentally double-count them
                     const baseRows = filtered.filter(item => item.Center.toLowerCase() !== 'total' && item.Therapist.toLowerCase() !== 'total');
 
                     baseRows.forEach(item => {
@@ -487,17 +578,17 @@
 
             // --- DROPDOWN LISTS FOR TABLE (NO RESTRICTIONS) ---
             const tableBrandsList = useMemo(() => {
-                if (!colMap) return [];
-                const validRows = data.filter(r => r[colMap.center] && !r[colMap.center].toLowerCase().includes('grand total'));
+                if (!colMap || colMap.brand < 0) return [];
+                const validRows = data.filter(r => colMap.center >= 0 && r[colMap.center] && !r[colMap.center].toLowerCase().includes('grand total'));
                 const bList = [...new Set(validRows.map(r => r[colMap.brand]).filter(Boolean))]
                     .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
                 return ['All', ...bList];
             }, [data, colMap]);
 
             const tableCentersList = useMemo(() => {
-                if (!colMap) return [];
+                if (!colMap || colMap.center < 0) return [];
                 const validRows = data.filter(r => r[colMap.center] && !r[colMap.center].toLowerCase().includes('grand total'));
-                const brandFiltered = tableBrand === 'All' ? validRows : validRows.filter(r => r[colMap.brand] === tableBrand);
+                const brandFiltered = tableBrand === 'All' ? validRows : validRows.filter(r => colMap.brand >= 0 && r[colMap.brand] === tableBrand);
                 
                 let rawList = [...new Set(brandFiltered.map(r => r[colMap.center]).filter(Boolean))];
                 const hasTotal = rawList.some(c => c.toLowerCase() === 'total');
@@ -511,10 +602,10 @@
             }, [data, tableBrand, colMap]);
 
             const tableTherapistsList = useMemo(() => {
-                if (!colMap) return [];
-                const validRows = data.filter(r => r[colMap.center] && !r[colMap.center].toLowerCase().includes('grand total'));
-                let brandFiltered = tableBrand === 'All' ? validRows : validRows.filter(r => r[colMap.brand] === tableBrand);
-                let centerFiltered = tableCenter === 'All' ? brandFiltered : brandFiltered.filter(r => r[colMap.center] === tableCenter);
+                if (!colMap || colMap.therapist < 0) return [];
+                const validRows = data.filter(r => colMap.center >= 0 && r[colMap.center] && !r[colMap.center].toLowerCase().includes('grand total'));
+                let brandFiltered = tableBrand === 'All' ? validRows : validRows.filter(r => colMap.brand >= 0 && r[colMap.brand] === tableBrand);
+                let centerFiltered = tableCenter === 'All' ? brandFiltered : brandFiltered.filter(r => colMap.center >= 0 && r[colMap.center] === tableCenter);
                 
                 let rawList = [...new Set(centerFiltered.map(r => r[colMap.therapist]).filter(Boolean))];
                 const hasTotal = rawList.some(t => t.toLowerCase() === 'total');
@@ -531,7 +622,6 @@
             const tableProcessedData = useMemo(() => {
                 if (!colMap || activeKPIs.length === 0) return [];
                 
-                // Allow table to show whatever filters match, ignoring Grand Total explicitly
                 let result = allProcessedData.filter(item => !item.Center.toLowerCase().includes('grand total'));
 
                 if (tableBrand !== 'All') result = result.filter(item => item.Brand === tableBrand);
